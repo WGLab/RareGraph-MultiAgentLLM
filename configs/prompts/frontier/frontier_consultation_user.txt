@@ -1,0 +1,20 @@
+PATIENT CLINICAL PROFILE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{patient_profile}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CANDIDATE DISEASES (top {top_n} from automated ranking)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{candidate_list}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TASK
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Using the five clinical lenses (A incongruity, B temporal, C demographic,
+D gene-phenotype, E critical absences), identify candidates that are either
+UNDERRANKED or OVERRANKED based on specific evidence in the patient profile.
+
+Comment only on noticeable cases. Empty lists are perfectly acceptable.
+Use VERBATIM disease names from the candidate list above.
+
+Return the JSON as specified.

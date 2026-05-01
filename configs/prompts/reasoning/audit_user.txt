@@ -1,0 +1,17 @@
+PATIENT EVIDENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{patient_evidence}
+
+CANDIDATE DISEASE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Disease: {disease_name} ({disease_id})
+Current composite rank: {current_rank}
+
+DISEASE REFERENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{disease_card}
+
+{narrative_block}{frontier_note}
+
+TASK
+Return the audit JSON as specified in the system prompt. Quotes must be verbatim.

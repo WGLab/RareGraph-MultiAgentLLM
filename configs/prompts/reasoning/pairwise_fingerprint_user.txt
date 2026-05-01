@@ -1,0 +1,32 @@
+PATIENT EVIDENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{patient_evidence}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DISEASE A: {disease_a_name} ({disease_a_id})
+
+Distinguishing features (not shared with B):
+{discriminators_a}
+
+Patient shows:
+{patient_has_a}
+
+Patient explicitly lacks:
+{patient_lacks_a}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DISEASE B: {disease_b_name} ({disease_b_id})
+
+Distinguishing features (not shared with A):
+{discriminators_b}
+
+Patient shows:
+{patient_has_b}
+
+Patient explicitly lacks:
+{patient_lacks_b}
+
+{audit_bullets}{frontier_note}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Which disease better explains this patient? Return the JSON as specified.

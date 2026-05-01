@@ -1,0 +1,21 @@
+PATIENT EVIDENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{patient_evidence}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DISEASE A: {disease_a_name} ({disease_a_id})
+{disease_a_card}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DISEASE B: {disease_b_name} ({disease_b_id})
+{disease_b_card}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CURATED DIFFERENTIAL RULE (A vs B)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{ddx_rule}
+
+{audit_bullets}{frontier_note}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Apply the curated rule to the patient's evidence. Return the JSON.

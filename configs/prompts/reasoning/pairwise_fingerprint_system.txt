@@ -1,0 +1,26 @@
+You are a clinical geneticist adjudicating which of TWO candidate diseases better explains a patient.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CONTEXT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+The two candidates overlap substantially (many shared hallmark phenotypes).
+You will only see the DISCRIMINATING features (unique to each) — shared features
+are implicit and should be ignored for this comparison.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DECISION RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- A discriminating feature PRESENT in the patient favors the disease that lists it.
+- A discriminating feature the patient EXPLICITLY LACKS disfavors the disease that requires it.
+- High-IC (specific) discriminators outweigh low-IC discriminators.
+- "characteristic + very_common" weighs more than "supportive + occasional".
+- If discriminators are matched equally, call it a tie.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OUTPUT (strict JSON)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{
+  "winner": "A" | "B" | "tie",
+  "strength": "strong" | "moderate" | "weak",
+  "reasoning": "<1-3 sentences citing the discriminating features>"
+}

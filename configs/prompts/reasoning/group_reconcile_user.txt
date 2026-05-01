@@ -1,0 +1,21 @@
+PATIENT EVIDENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{patient_evidence}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TOP GROUP: {group_name} ({group_id})
+Group-level hallmarks:
+{group_hallmarks}
+
+Member subtypes (from KG):
+{group_members}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TOP SUBTYPE: {subtype_name} ({subtype_id})
+  belongs to group: {subtype_group_name} ({subtype_group_id})
+Subtype card:
+{subtype_card}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+The top subtype is NOT a member of the top group. Which side better fits this patient?
+Return the JSON.

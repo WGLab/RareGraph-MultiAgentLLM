@@ -1,0 +1,233 @@
+# ============================================================
+# RareGraph default configuration
+# ============================================================
+# All pipeline behavior is controlled from this file. The pipeline
+# is designed so that you can switch the frontier consultation between
+# local LLM (free, for testing) and a cloud API (for production) with
+# a single config change: frontier.provider.
+# ============================================================
+
+project:
+  name: "raregraph"
+  outputs_dir: "outputs"
+  dataset: "demo"
+
+paths:
+  # Path to the harmonized Mondo/OMIM/Orphanet/GeneReviews KG.
+  # This is the large JSON you built. Adjust to your actual path.
+  kg_path: "data/knowledge_graph/Mondo_diseases_KG_combined.json"
+
+  # Full Mondo term dump for disease normalization.
+  full_mondo: "data/knowledge_graph/complete_structured_mondo_kg.json"
+
+  # Disease ID cross-mapping files.
+  omim2path: "data/mondo/omim_conversion.json"
+  orphanet2path: "data/mondo/orphanet_conversion.json"
+
+  # Disease group hierarchy file.
+  hierarchy: "data/mondo/hierarchy.json"
+
+  # HPO ontology OBO file (downloaded by scripts/00_download_hpo.py).
+  hpo_obo: "data/hpo/hp.obo"
+
+  # Index / cache directories.
+  index_dir: "data/indexes"
+  cache_dir: "data/cache"
+
+# ============================================================
+# Models (Stage 1, 5, 6, 8)
+# ============================================================
+models:
+  text_llm:
+    model_name: Qwen/Qwen3-8B #"google/medgemma-27b-it" #"Qwen/Qwen3-8B"
+    temperature: 0.2
+    max_tokens: 10000
+    tensor_parallel_size: 1
+    gpu_memory_utilization: 0.85
+    max_batch_size: 64
+    thinking: false
+
+  vision_llm:
+    model_name: "Qwen/Qwen3.5-2B"
+    temperature: 0.2
+    max_tokens: 500
+    tensor_parallel_size: 1
+    gpu_memory_utilization: 0.85
+    max_batch_size: 4
+
+# ============================================================
+# Vision runtime
+# ============================================================
+vision:
+  provider: "local"               # "local" | "openrouter" | "openai"
+  extraction_mode: "preextract_unload"  # "preextract_unload" | "inline"
+  unload_after_extraction: true
+  final_rerank: false             # keep image use extraction-only by default
+  model_name: "openai/gpt-5.4"    # used only when provider != local
+  api_key_env: "OPENROUTER_API_KEY"
+  api_base_url: "https://openrouter.ai/api/v1"
+  timeout_seconds: 120
+
+# ============================================================
+# Normalization (Stage 2)
+# ============================================================
+normalization:
+  embed_model: "FremyCompany/BioLORD-2023"
+  similarity_threshold: 0.75
+
+# ============================================================
+# HPO expansion (Stage 2)
+#
+# "ic_gated" (default, recommended):
+#   - low-IC patient terms expand downward + siblings (specific variants)
+#   - medium-IC expand to children only
+#   - high-IC no expansion
+# "fixed_degree" (backward-compat):
+#   - uses original degree_weights behavior from rare_dx_mcp
+# ============================================================
+expansion:
+  mode: "ic_gated"                # "ic_gated" | "fixed_degree"
+  max_expansion_depth: 1
+
+# ============================================================
+# Scoring (Stage 3)
+# ============================================================
+scoring:
+  # Per-component toggles for ablation
+  use_specific_signal: true       # high-IC hallmark match bonus
+  use_incongruity_match: true     # bridges dominant + outlier branches
+  use_cooccurrence_pairs: true    # rare phenotype-pair retrieval
+  use_adaptive_weights: true      # zero-weight components with no input data
+  # Base component weights (used directly when adaptive_weights is false;
+  # scaled based on evidence availability when true)
+  weights:
+    phenotype: 4.0
+    genotype: 3.0
+    family_evidence: 1.0
+    demographics: 1.0
+    cases: 1.0
+    specific_signal: 2.0
+    incongruity_match: 2.0
+    cooccurrence_pairs: 1.5
+
+  # Minimum IC to treat a patient HPO as "high-IC" (used in specific_signal).
+  # Uses an absolute threshold to avoid sparse frequency metadata suppressing the signal.
+  ic_high_threshold: 5.0
+
+# ============================================================
+# Retrieval (Stage 3)
+# ============================================================
+retrieval:
+  # Broad deterministic candidate pool before composite scoring.
+  # This is cheap relative to LLM stages.
+  initial_top_k: 2000
+
+  # Number of Stage 3 scored candidates retained for downstream tables,
+  # family-evidence shortlisting, and possible later rescue/debugging.
+  retain_top_k: 300
+
+# ============================================================
+# Frontier consultation (Stage 4) — CONDITIONAL, at most 1 API call per patient
+# ============================================================
+# Master switch: frontier.enabled controls whether Stage 4 runs.
+# provider: "local" routes through the same vLLM client (no API cost);
+#           "openrouter", "vertexai", "openai" use the external API.
+# Switching between them requires only changing this block.
+# ============================================================
+frontier:
+  enabled:  false                  # master switch
+  provider: "local"               # "local" | "openrouter" | "vertexai" | "openai"
+
+  # When provider == "local": uses models.text_llm (same vLLM instance)
+  # When provider != "local": uses this model via API
+  model_name: "anthropic/claude-opus-4.6"
+
+  # API settings (used when provider != "local")
+  api_key_env: "OPENROUTER_API_KEY"   # env variable holding the API key
+  api_base_url: "https://openrouter.ai/api/v1"
+  temperature: 0.1
+  max_tokens: 12000
+  timeout_seconds: 120
+
+  # How many top candidates to include in the frontier prompt
+  top_n_candidates: 100
+
+  # Trigger conditions — any true fires the call
+  trigger:
+    on_incongruity: true            # fire when incongruity strength >= moderate
+    on_top5_ambiguity: true         # fire when top-5 score gap < 10%
+    on_low_specific_signal: true    # fire when no top-20 has specific_signal > 0
+    force_always: false             # override: always fire (for ablation)
+
+# ============================================================
+# Audit (Stage 5)
+# ============================================================
+audit:
+  # Number of top post-Stage-3 candidates audited locally.
+  # Kept separate from frontier.top_n_candidates so each can be tuned independently.
+  top_n_candidates: 100
+  use_narrative_excerpts: true    # include per-candidate narrative excerpts if KG has them
+  skip_if_frontier_flagged: true  # skip audit only for frontier-underranked candidates
+
+  multipliers:
+    strong: 1.3
+    moderate: 1.0
+    weak: 0.7
+    implausible: 0.3
+
+# ============================================================
+# Pairwise (Stage 6)
+# ============================================================
+pairwise:
+  top_n: 30                       # candidates entering pairwise
+  skip_large_gaps: true           # skip pairs with audit-category gap >= 2
+  skip_score_gap_multiplier: 2.0  # skip if scoreA > scoreB * this
+  adaptive_prompts: true          # fingerprint vs differential vs card-based
+  bidirectional_swap: true        # swap test for frontier-flagged pairs
+  use_audit_bullets: true         # forward audit evidence into pairwise
+  overlap_threshold_high: 0.6     # Jaccard threshold for fingerprint-focused
+
+# ============================================================
+# Rank aggregation (Stage 7)
+# ============================================================
+rank_aggregation:
+  damping: 0.85
+  max_iter: 200
+  tol: 1.0e-10
+  close_margin: 0.01
+
+# ============================================================
+# Reconciliation (Stage 8)
+# ============================================================
+reconciliation:
+  enabled: true
+  alpha_gene_strong: 0.0          # when strong gene evidence exists
+  alpha_group_hallmarks: 1.0      # when group hallmarks dominate
+  alpha_default: 0.5
+  tiebreaker_on_disagreement: true
+
+# ============================================================
+# External retrieval
+# ============================================================
+external:
+  pubcase_finder:
+    enabled: true
+    max_results: 10
+
+# ============================================================
+# Genomics (VCF handling)
+# ============================================================
+genomics:
+  vcf_analyzer: "auto"            # "auto" | "exomiser" | "rankvar"
+  results_dir: ""                 # optional completed Exomiser/RankVar output dir
+  trigger_if_missing: true        # records pending status unless an external runner is configured
+  trigger_command: ""             # optional async command template; see scripts/run_pipeline.py
+
+# ============================================================
+# Pipeline / output
+# ============================================================
+output:
+  scorecard_top_k: 10
+  save_rank_trajectory: true
+  save_scorecard_txt: true
+  save_scorecard_json: true
