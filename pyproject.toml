@@ -1,0 +1,115 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "raredis-graph-multiagent"
+version = "1.0.0"
+description = "A locally deployable multi-agent system for rare disease prioritization using a curated knowledge graph and open-weight language models"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Quan Minh Nguyen", email = "nguyenqm@chop.edu" },
+    { name = "Kai Wang",         email = "wangk@chop.edu"    },
+]
+requires-python = ">=3.9"
+keywords = [
+    "rare disease",
+    "phenotype prioritization",
+    "knowledge graph",
+    "language model",
+    "clinical NLP",
+    "HPO",
+    "MONDO",
+    "diagnostic support",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Healthcare Industry",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Operating System :: POSIX :: Linux",
+]
+
+# Core dependencies — mirrors requirements.txt
+dependencies = [
+    # LLM inference
+    "vllm>=0.4.0",
+    "transformers>=4.40.0",
+    "accelerate>=0.29.0",
+    "torch>=2.1.0",
+    # Vision pathway
+    "Pillow>=10.0.0",
+    "torchvision>=0.16.0",
+    # Ontology & knowledge graph
+    "pronto>=2.5.0",
+    "networkx>=3.2.0",
+    "obonet>=1.0.0",
+    # Biomedical / data
+    "pandas>=2.0.0",
+    "numpy>=1.26.0",
+    "scipy>=1.11.0",
+    # VCF handling
+    "cyvcf2>=0.30.0",
+    # Fuzzy matching (MONDO normalization)
+    "rapidfuzz>=3.6.0",
+    # Config & CLI
+    "pyyaml>=6.0.1",
+    "omegaconf>=2.3.0",
+    "click>=8.1.0",
+    "tqdm>=4.66.0",
+    # Output & evaluation
+    "jsonlines>=4.0.0",
+    "tabulate>=0.9.0",
+    # Utilities
+    "requests>=2.31.0",
+    "python-dotenv>=1.0.0",
+    "loguru>=0.7.0",
+]
+
+[project.optional-dependencies]
+# Install dev tools with:  pip install -e ".[dev]"
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "black>=24.0.0",
+    "ruff>=0.4.0",
+    "mypy>=1.9.0",
+]
+
+[project.urls]
+Homepage       = "https://github.com/WGLab/RareDisGraph-MultiAgentLLM"
+"Bug Tracker"  = "https://github.com/WGLab/RareDisGraph-MultiAgentLLM/issues"
+"Knowledge Graph" = "https://github.com/WGLab/RareDisGraph-Extraction"
+Lab            = "https://github.com/WGLab"
+
+[project.scripts]
+raredis-run      = "raregraph.cli:run_pipeline"
+raredis-batch    = "raregraph.cli:run_batch"
+raredis-evaluate = "raregraph.cli:evaluate"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"*" = ["*.yaml", "*.json", "*.obo"]
+
+# ----- Formatter & linter config (optional, delete if not using) -------------
+[tool.black]
+line-length = 100
+target-version = ["py39", "py310", "py311"]
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts   = "-v --tb=short"
