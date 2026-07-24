@@ -21,7 +21,6 @@ data/**
 **/*_results/
 outputs/
 outputs_*/
-figures/
 figures_*/
 MultiAgents_Evals/
 RAG_results/
