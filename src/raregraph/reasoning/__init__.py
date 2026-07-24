@@ -7,6 +7,7 @@ from .audit import (
 from .pairwise import run_pairwise_batch
 from .rank_centrality import aggregate_rank, pagerank, build_win_loss_graph
 from .reconciliation import reconcile
+from .final_fusion import apply_final_fusion
 from .scorecard import build_scorecard, format_scorecard_text, build_rank_trajectory
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     "run_pairwise_batch",
     "aggregate_rank", "pagerank", "build_win_loss_graph",
     "reconcile",
+    "apply_final_fusion",
     "build_scorecard", "format_scorecard_text", "build_rank_trajectory",
 ]

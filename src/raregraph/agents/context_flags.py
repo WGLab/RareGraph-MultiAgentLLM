@@ -54,6 +54,38 @@ HYPOTHETICAL_RE = _compile_union(HYPOTHETICAL_TRIGGERS)
 HISTORICAL_RE = _compile_union(HISTORICAL_TRIGGERS)
 
 SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+QUOTE_TRANSLATION = {
+    ord(ch): None
+    for ch in (
+        "'\"`"
+        + chr(0x2018)
+        + chr(0x2019)
+        + chr(0x201A)
+        + chr(0x201B)
+        + chr(0x201C)
+        + chr(0x201D)
+        + chr(0x201E)
+        + chr(0x201F)
+    )
+}
+JSON_PUNCT_TRANSLATION = str.maketrans({
+    "{": "(",
+    "}": ")",
+    "[": "(",
+    "]": ")",
+})
+CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+SPACE_RE = re.compile(r"\s+")
+
+
+def sanitize_note_for_extraction(text: str) -> str:
+    """Compact note text and remove characters that often break JSON echoes."""
+    if not text or not isinstance(text, str):
+        return text or ""
+    text = CONTROL_RE.sub(" ", text)
+    text = text.translate(QUOTE_TRANSLATION)
+    text = text.translate(JSON_PUNCT_TRANSLATION)
+    return SPACE_RE.sub(" ", text).strip()
 
 
 def flag_sentence(sent: str) -> str:
@@ -75,6 +107,8 @@ def add_context_flags(text: str) -> str:
     """Return note text with per-sentence context flags prepended."""
     if not text or not isinstance(text, str):
         return text or ""
+
+    text = sanitize_note_for_extraction(text)
 
     # Naive sentence splitter; good enough for flagging.
     sentences = SENTENCE_SPLIT_RE.split(text.strip())

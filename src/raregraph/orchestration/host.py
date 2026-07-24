@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import logging, torch
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -24,6 +25,7 @@ from raregraph.agents.text_agents import (
     run_family_history_extractor_batch,
     run_testing_extractor_batch,
     run_gene_mentions_extractor_batch,
+    run_stage1_text_extractors_batch,
 )
 from raregraph.agents.vision_agents import (
     run_vision_extractor_batch,
@@ -58,11 +60,19 @@ from raregraph.reasoning.audit import run_audit_batch, apply_audit_multipliers
 from raregraph.reasoning.pairwise import run_pairwise_batch
 from raregraph.reasoning.rank_centrality import aggregate_rank
 from raregraph.reasoning.reconciliation import reconcile
+from raregraph.reasoning.final_fusion import apply_final_fusion
 from raregraph.reasoning.scorecard import (
     build_scorecard, format_scorecard_text, build_rank_trajectory,
 )
 
 logger = setup_logger("raregraph")
+
+
+SOURCE_PRIORITY = {
+    "text": 0,
+    "free_hpo": 1,
+    "vision": 2,
+}
 
 
 class RareGraphHost:
@@ -268,6 +278,65 @@ class RareGraphHost:
             release_vision_client(self.vision_llm)
             self.vision_llm = None
 
+    def _build_extracted_entities(self, stage1_out: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Flatten Stage 1 extractor outputs into an auditable entity list."""
+        entities: List[Dict[str, Any]] = []
+        list_fields = [
+            ("text_phenotypes", "phenotype", "text"),
+            ("vision_phenotypes", "phenotype", "vision"),
+            ("free_hpo_mentions", "phenotype", "free_hpo"),
+            ("family_history", "family_history", "text"),
+            ("testing", "test", "text"),
+            ("gene_mentions", "gene", "text"),
+            ("vcf_summary", "gene", "genomics"),
+        ]
+        for field, entity_type, source in list_fields:
+            for item in stage1_out.get(field, []) or []:
+                if not isinstance(item, dict):
+                    continue
+                ent = dict(item)
+                ent.setdefault("entity_type", entity_type)
+                ent.setdefault("source", source)
+                ent.setdefault("stage1_field", field)
+                entities.append(ent)
+
+        demographics = stage1_out.get("demographics")
+        if isinstance(demographics, dict):
+            for key in ("age", "sex", "ethnicity"):
+                value = demographics.get(key)
+                if value not in (None, "", {}, []):
+                    entities.append({
+                        "entity_type": "demographic",
+                        "source": "text",
+                        "stage1_field": "demographics",
+                        "attribute": key,
+                        "value": value,
+                    })
+        return entities
+
+    def _deduplicate_normalized_hpo(
+        self,
+        items: List[NormalizedPhenotype],
+    ) -> List[NormalizedPhenotype]:
+        """Collapse repeated normalized HPO evidence before scoring.
+
+        Present and negated mentions are kept separate because they represent
+        different clinical assertions. For duplicates, prefer text/free-HPO over
+        vision and then the higher normalizer confidence.
+        """
+        best: Dict[tuple[str, bool], NormalizedPhenotype] = {}
+
+        def rank(item: NormalizedPhenotype) -> tuple[int, float, int]:
+            source_rank = SOURCE_PRIORITY.get(str(item.source or ""), 9)
+            evidence_len = len(re.sub(r"\s+", " ", str(item.evidence or "")).strip())
+            return (source_rank, -float(item.score or 0.0), -evidence_len)
+
+        for item in items:
+            key = (str(item.hpo_id), bool(item.present))
+            if key not in best or rank(item) < rank(best[key]):
+                best[key] = item
+        return list(best.values())
+
     # ---------------------------------------------------------------
     # Per-patient pipeline
     # ---------------------------------------------------------------
@@ -374,9 +443,27 @@ class RareGraphHost:
             reranked_subtype, reranked_group, state, self.kg_index, self.cfg,
             llm=self.text_llm, prompt_dir=self.prompt_dir,
         )
+        reconciled_df = reconciled.get("reconciled_df")
+        if isinstance(reconciled_df, pd.DataFrame):
+            reconciled_df = self._ensure_group_columns(reconciled_df)
+            reconciled["reconciled_df"] = reconciled_df
+            reconciled_df.to_csv(out_dir / "stage8_reconciled_ranking.tsv", sep="\t", index=False)
+
+            final_df, final_ranking = apply_final_fusion(reconciled_df, self.cfg)
+            final_df = self._ensure_group_columns(final_df)
+            reconciled["final_df"] = final_df
+            reconciled["final_ranking"] = final_ranking
+            reconciled["final_top_subtype"] = final_ranking.get("top_subtype")
+            final_df.to_csv(out_dir / "stage8_final_fusion.tsv", sep="\t", index=False)
+        else:
+            reconciled["final_ranking"] = {"enabled": False, "method": "unavailable", "top_subtype": None}
+            reconciled["final_top_subtype"] = reconciled.get("top_subtype")
+
         state.reconciled = {
             "top_subtype": reconciled.get("top_subtype"),
             "top_group": reconciled.get("top_group"),
+            "final_top_subtype": reconciled.get("final_top_subtype"),
+            "final_ranking": reconciled.get("final_ranking"),
             "disagreement": reconciled.get("disagreement", False),
             "tiebreaker": reconciled.get("tiebreaker"),
             "method": reconciled.get("method", ""),
@@ -386,11 +473,14 @@ class RareGraphHost:
         # =================== STAGE 9 ===================
         logger.info("--- Stage 9: Clinical scorecard ---")
         final_df_for_scorecard = (
-            reconciled["reconciled_df"] if isinstance(reconciled.get("reconciled_df"), pd.DataFrame)
+            reconciled["final_df"] if isinstance(reconciled.get("final_df"), pd.DataFrame)
+            else reconciled["reconciled_df"] if isinstance(reconciled.get("reconciled_df"), pd.DataFrame)
             else reranked_subtype
         )
         final_df_for_scorecard = self._ensure_group_columns(final_df_for_scorecard)
-        if isinstance(reconciled.get("reconciled_df"), pd.DataFrame):
+        if isinstance(reconciled.get("final_df"), pd.DataFrame):
+            reconciled["final_df"] = final_df_for_scorecard
+        elif isinstance(reconciled.get("reconciled_df"), pd.DataFrame):
             reconciled["reconciled_df"] = final_df_for_scorecard
         scorecard = build_scorecard(
             state, final_df_for_scorecard, audit_results,
@@ -456,11 +546,14 @@ class RareGraphHost:
         if note_path and not loaded_stage1_cache:
             # Read note
             note_text = Path(note_path).read_text(encoding="utf-8")
-            phens = run_phenotype_extractor_batch(self.text_llm, [note_text], self.prompt_dir)[0]
-            demo = run_demographics_extractor_batch(self.text_llm, [note_text], self.prompt_dir)[0]
-            fam = run_family_history_extractor_batch(self.text_llm, [note_text], self.prompt_dir)[0]
-            tests = run_testing_extractor_batch(self.text_llm, [note_text], self.prompt_dir)[0]
-            genes = run_gene_mentions_extractor_batch(self.text_llm, [note_text], self.prompt_dir)[0]
+            text_out = run_stage1_text_extractors_batch(
+                self.text_llm, [note_text], self.prompt_dir
+            )[0]
+            phens = text_out["text_phenotypes"]
+            demo = text_out["demographics"]
+            fam = text_out["family_history"]
+            tests = text_out["testing"]
+            genes = text_out["gene_mentions"]
             
             state.note_text = note_text
             state.phenotype_mentions_text = phens if isinstance(phens, list) else []
@@ -474,6 +567,7 @@ class RareGraphHost:
             out["family_history"] = state.family_history
             out["testing"] = state.testing
             out["gene_mentions"] = state.gene_mentions
+            out["extraction_diagnostics"] = text_out.get("extraction_diagnostics", {})
 
         if note_path and not state.note_text:
             state.note_text = Path(note_path).read_text(encoding="utf-8")
@@ -553,6 +647,7 @@ class RareGraphHost:
                         "Genomics evidence is pending and was not scored."
                     )
 
+        out["extracted_entities"] = self._build_extracted_entities(out)
         return out
 
     def _stage1_text_extraction_batch(
@@ -568,24 +663,21 @@ class RareGraphHost:
             return {}
 
         notes = [Path(case["note_path"]).read_text(encoding="utf-8") for case in note_cases]
-        phens = run_phenotype_extractor_batch(self.text_llm, notes, self.prompt_dir)
-        demos = run_demographics_extractor_batch(self.text_llm, notes, self.prompt_dir)
-        fams = run_family_history_extractor_batch(self.text_llm, notes, self.prompt_dir)
-        tests = run_testing_extractor_batch(self.text_llm, notes, self.prompt_dir)
-        genes = run_gene_mentions_extractor_batch(self.text_llm, notes, self.prompt_dir)
+        text_outs = run_stage1_text_extractors_batch(self.text_llm, notes, self.prompt_dir)
 
         out: Dict[str, Dict[str, Any]] = {}
-        for case, note_text, phen, demo, fam, test, gene in zip(
-            note_cases, notes, phens, demos, fams, tests, genes
-        ):
-            out[case["case_id"]] = {
+        for case, note_text, text_out in zip(note_cases, notes, text_outs):
+            payload = {
                 "note_text": note_text,
-                "text_phenotypes": phen if isinstance(phen, list) else [],
-                "demographics": demo if isinstance(demo, dict) else {},
-                "family_history": fam if isinstance(fam, list) else [],
-                "testing": test if isinstance(test, list) else [],
-                "gene_mentions": gene if isinstance(gene, list) else [],
+                "text_phenotypes": text_out["text_phenotypes"],
+                "demographics": text_out["demographics"],
+                "family_history": text_out["family_history"],
+                "testing": text_out["testing"],
+                "gene_mentions": text_out["gene_mentions"],
+                "extraction_diagnostics": text_out.get("extraction_diagnostics", {}),
             }
+            payload["extracted_entities"] = self._build_extracted_entities(payload)
+            out[case["case_id"]] = payload
         return out
 
     def precompute_stage1_extractions(
@@ -644,7 +736,9 @@ class RareGraphHost:
                 onset=n.get("onset"),
                 evidence=n.get("evidence"),
                 ic=float(n.get("ic", 0.0)),
+                present=bool(n.get("present", True)),
             ))
+        state.normalized_hpo = self._deduplicate_normalized_hpo(state.normalized_hpo)
 
         # Temporal view (over present phenotypes)
         present_list = [
@@ -697,9 +791,18 @@ class RareGraphHost:
             present_hpos, self.kg_index, self.hpo,
             expansion_mode=self.cfg.expansion.mode,
             max_depth=self.cfg.expansion.max_expansion_depth,
+            low_ic_threshold=getattr(self.cfg.expansion, "low_ic_threshold", 3.5),
+            medium_ic_threshold=getattr(self.cfg.expansion, "medium_ic_threshold", 5.0),
         )
         gene_candidates = retrieve_by_gene(
-            state.gene_mentions, state.vcf_summary, self.kg_index
+            state.gene_mentions,
+            state.vcf_summary,
+            self.kg_index,
+            evidence_policy=getattr(
+                getattr(self.cfg, "scoring", {}),
+                "gene_evidence_policy",
+                "negative_only",
+            ),
         )
         cooc_candidates = retrieve_by_cooccurrence(
             present_hpos, self.kg_index, self.hpo,

@@ -28,6 +28,29 @@ class PhenotypeScoreConfig:
     direct_relation_floor: float = 0.5
     cousin_similarity_threshold: float = 0.6
     cousin_lca_ic_threshold: float = 2.0
+    disease_size_norm_cap: int = 60
+
+
+# Stage-3 phenotype matching uses softer disease-label weights than the
+# retrieval/hallmark index. A diagnosis can be supported by a constellation of
+# lower-frequency features, especially in HPO-only benchmark cases where
+# pathognomonic hallmarks may be absent from the patient profile.
+PHENOTYPE_IMPORTANCE_WEIGHT = {
+    "characteristic": 1.0,
+    "supportive": 0.85,
+    "incidental": 0.25,
+}
+
+PHENOTYPE_FREQUENCY_WEIGHT = {
+    "very_common": 1.0,
+    "common": 0.9,
+    "more_than_half": 0.8,
+    "occasional": 0.65,
+    "rare": 0.45,
+    "unknown": 0.6,
+    "": 0.6,
+    None: 0.6,
+}
 
 
 ANTONYM_PREFIX_PAIRS: Tuple[Tuple[str, str], ...] = (
@@ -93,10 +116,19 @@ def _direct_credit(relation: str, patient_ic: float, matched_ic: float, floor: f
     return min(1.0, max(floor, ratio))
 
 
+def _safe_ic(hpo: HpoOntology, hid: str) -> float:
+    return max(0.0, float(hpo.get_ic(hid)))
+
+
+def _phenotype_label_weights(info: Dict[str, Any]) -> Tuple[float, float]:
+    imp_w = PHENOTYPE_IMPORTANCE_WEIGHT.get(info.get("importance", "incidental"), 0.25)
+    freq_w = PHENOTYPE_FREQUENCY_WEIGHT.get(info.get("frequency"), 0.6)
+    return imp_w, freq_w
+
+
 def _match_priority(info: Dict[str, Any], hpo: HpoOntology, hid: str, credit: float, bonus: float = 0.0) -> float:
-    disease_ic = hpo.get_ic(hid)
-    imp_w = IMPORTANCE_WEIGHT.get(info.get("importance", "incidental"), 0.35)
-    freq_w = FREQUENCY_WEIGHT.get(info.get("frequency"), 0.5)
+    disease_ic = _safe_ic(hpo, hid)
+    imp_w, freq_w = _phenotype_label_weights(info)
     return disease_ic * imp_w * freq_w * credit + bonus
 
 
@@ -136,7 +168,7 @@ def phenotype_score(
         if not phid:
             continue
         phid = str(phid)
-        patient_ic = hpo.get_ic(phid)
+        patient_ic = _safe_ic(hpo, phid)
         patient_name = hpo.get_name(phid)
 
         # Competitive IC downweight
@@ -175,7 +207,7 @@ def phenotype_score(
                     credit = _direct_credit(
                         rel_name,
                         patient_ic=patient_ic,
-                        matched_ic=hpo.get_ic(hid),
+                        matched_ic=_safe_ic(hpo, hid),
                         floor=cfg.direct_relation_floor,
                     )
                     direct_candidates.append((
@@ -234,8 +266,7 @@ def phenotype_score(
         use_count = match_counter_per_kg_hpo.get(matched_hid, 0)
         decay = cfg.reuse_decay ** use_count
 
-        imp_w = IMPORTANCE_WEIGHT.get(info.get("importance", "incidental"), 0.35)
-        freq_w = FREQUENCY_WEIGHT.get(info.get("frequency"), 0.5)
+        imp_w, freq_w = _phenotype_label_weights(info)
 
         contribution = (
             patient_ic
@@ -289,12 +320,13 @@ def phenotype_score(
             continue
         imp_w = IMPORTANCE_WEIGHT.get(info.get("importance", "incidental"), 0.35)
         freq_w = FREQUENCY_WEIGHT.get(info.get("frequency"), 0.5)
-        pen = (cfg.neg_min_penalty + 0.8 * imp_w * freq_w) * hpo.get_ic(nhid)
+        pen = (cfg.neg_min_penalty + 0.8 * imp_w * freq_w) * _safe_ic(hpo, nhid)
         neg_penalty += pen
 
     # Disease-size normalization
     size = max(1, len(kg_phens))
-    normalized = score_sum / (size ** 0.5)
+    effective_size = min(size, max(1, cfg.disease_size_norm_cap))
+    normalized = score_sum / (effective_size ** 0.5)
 
     raw = normalized - neg_penalty
     return {

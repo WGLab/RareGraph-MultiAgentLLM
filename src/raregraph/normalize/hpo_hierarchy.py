@@ -38,6 +38,8 @@ def ic_gated_expand(
     mode: str = "ic_gated",
     max_depth: int = 1,
     sibling_credit: float = 0.6,
+    low_ic_threshold: float | None = None,
+    medium_ic_threshold: float | None = None,
 ) -> List[ExpandedTerm]:
     """Expand a patient HPO term into a list of (id, credit, relation) tuples.
 
@@ -69,11 +71,14 @@ def ic_gated_expand(
         return out
 
     # ---- ic_gated ----
-    p25 = hpo.ic_p25
-    median = hpo.ic_median
+    # Use fixed KG-calibrated thresholds instead of global IC quantiles.
+    # The KG-wide p25 can be high because unannotated ontology terms receive
+    # max IC; clinically broad patient terms are usually below ~3.5-4.
+    low_ic_threshold = 3.5 if low_ic_threshold is None else float(low_ic_threshold)
+    medium_ic_threshold = 5.0 if medium_ic_threshold is None else float(medium_ic_threshold)
 
     # Children + siblings for LOW-IC
-    if patient_ic < p25:
+    if patient_ic < low_ic_threshold:
         children = _get_children_within_depth(hpo, hpo_id, depth=max_depth)
         siblings = hpo.get_siblings(hpo_id)
         for c in children:
@@ -89,7 +94,7 @@ def ic_gated_expand(
             out.append(ExpandedTerm(s, sibling_credit, "sibling", hpo_id))
 
     # Children only for MEDIUM-IC
-    elif patient_ic < median:
+    elif patient_ic < medium_ic_threshold:
         children = _get_children_within_depth(hpo, hpo_id, depth=max_depth)
         for c in children:
             if c == hpo_id:
@@ -129,9 +134,18 @@ def expand_patient_hpo_set(
     hpo: HpoOntology,
     mode: str = "ic_gated",
     max_depth: int = 1,
+    low_ic_threshold: float = 3.5,
+    medium_ic_threshold: float = 5.0,
 ) -> Dict[str, List[ExpandedTerm]]:
     """Apply IC-gated expansion to a list of patient HPO IDs."""
     result: Dict[str, List[ExpandedTerm]] = {}
     for hid in patient_hpos:
-        result[hid] = ic_gated_expand(hid, hpo, mode=mode, max_depth=max_depth)
+        result[hid] = ic_gated_expand(
+            hid,
+            hpo,
+            mode=mode,
+            max_depth=max_depth,
+            low_ic_threshold=low_ic_threshold,
+            medium_ic_threshold=medium_ic_threshold,
+        )
     return result

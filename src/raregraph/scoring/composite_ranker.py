@@ -1,6 +1,6 @@
 """Composite ranker: Stage 3 of RareGraph.
 
-Combines 8 scoring components with adaptive, evidence-dependent weights:
+Combines the production phenotype/KG scoring components:
   1. Phenotype (IC-weighted + freq-aware negation + competitive IC)
   2. Genotype (Bayesian log-LR)
   3. Inheritance (prior × compatibility)
@@ -9,6 +9,9 @@ Combines 8 scoring components with adaptive, evidence-dependent weights:
   6. Specific signal (high-IC hallmark match bonus)
   7. Incongruity match (bridges dominant + outlier branches)
   8. Co-occurrence pairs (rare pair matches)
+  9. Semantic similarity (HPO MICA best-match-average)
+10. Coverage-aware phenotype profile (patient recall + branch coverage)
+11. Evidence-quality controls (generic guard + anchor cluster)
 
 Normalization strategy:
   - Heavy-tailed components (phenotype, cases) → log1p + min-max rescaling
@@ -25,17 +28,19 @@ import numpy as np
 import pandas as pd
 
 from raregraph.core.compat import to_dict
-from raregraph.core.config import retrieval_retain_top_k
+from raregraph.core.config import cfg_get, retrieval_retain_top_k
 from raregraph.kg.kg_precompute import KGIndex
 from raregraph.normalize.hpo_ontology import HpoOntology
 
 from .phenotype_score import phenotype_score, PhenotypeScoreConfig
+from .phenotype_profile_score import phenotype_profile_score
 from .specific_signal_score import specific_signal_score
 from .incongruity_match_score import incongruity_match_score
 from .cooccurrence_score import cooccurrence_score
+from .semantic_similarity_score import semantic_similarity_score
 from .gene_variant_score import genotype_score, GenotypeConfig
 from .family_evidence_score import prepare_family_evidence, family_evidence_score
-from .demographics_score import demographics_score, DemographicsConfig
+from .demographics_score import demographics_score
 
 logger = logging.getLogger(__name__)
 
@@ -61,54 +66,29 @@ def _log_min_max_rescale(values: np.ndarray, tie_floor: float = 0.0) -> np.ndarr
 
 FAMILY_EVIDENCE_SHORTLIST_FLOOR = 500
 
+def _case_branch_concentration(present_hpos: List[Dict[str, Any]], hpo: HpoOntology) -> float:
+    """Fraction of patient phenotype branch assignments in the dominant HPO branch."""
+    branch_counts: Dict[str, int] = {}
+    for item in present_hpos:
+        hid = item.get("hpo_id")
+        if not hid:
+            continue
+        branches = hpo.get_branches(str(hid))
+        if not branches:
+            branch_counts["NO_BRANCH"] = branch_counts.get("NO_BRANCH", 0) + 1
+        for branch in branches:
+            branch_counts[branch] = branch_counts.get(branch, 0) + 1
+    total = sum(branch_counts.values())
+    return float(max(branch_counts.values()) / total) if total else 0.0
 
-def _adaptive_weights(
-    base_weights: Dict[str, float],
-    has_genes: bool,
-    has_family: bool,
-    has_demographics: bool,
-    has_cases: bool,
-    n_patient_hpos: int,
-    has_vcf_positive: bool = False,
-) -> Dict[str, float]:
-    """Zero out components with no input data; scale by evidence availability."""
-    w = dict(base_weights)
 
-    # Phenotype weight scales with number of patient HPOs
-    if n_patient_hpos >= 5:
-        w["phenotype"] = base_weights.get("phenotype", 4.0)
-    elif n_patient_hpos >= 3:
-        w["phenotype"] = base_weights.get("phenotype", 4.0) * 0.8
-    elif n_patient_hpos >= 1:
-        w["phenotype"] = base_weights.get("phenotype", 4.0) * 0.6
-    else:
-        w["phenotype"] = 0.0
-
-    # Genotype
-    if has_vcf_positive:
-        w["genotype"] = base_weights.get("genotype", 3.0)
-    elif has_genes:
-        w["genotype"] = base_weights.get("genotype", 3.0) * 0.5
-    else:
-        w["genotype"] = 0.0
-
-    # Inheritance — zero if no family history at all
-    family_weight = base_weights.get("family_evidence", base_weights.get("inheritance", 1.0))
-    w["family_evidence"] = family_weight if has_family else 0.0
-    w.pop("inheritance", None)
-
-    # Demographics — zero if nothing known
-    w["demographics"] = base_weights.get("demographics", 1.0) if has_demographics else 0.0
-
-    # Cases — zero if disabled / unavailable
-    w["cases"] = base_weights.get("cases", 1.0) if has_cases else 0.0
-
-    # Specific signal / incongruity / co-occurrence: always on when data exists
-    w["specific_signal"] = base_weights.get("specific_signal", 2.0) if n_patient_hpos > 0 else 0.0
-    w["incongruity_match"] = base_weights.get("incongruity_match", 2.0) if n_patient_hpos > 0 else 0.0
-    w["cooccurrence_pairs"] = base_weights.get("cooccurrence_pairs", 1.5) if n_patient_hpos >= 2 else 0.0
-
-    return w
+def _case_low_ic_fraction(present_hpos: List[Dict[str, Any]], hpo: HpoOntology) -> float:
+    ics = []
+    for item in present_hpos:
+        hid = item.get("hpo_id")
+        if hid:
+            ics.append(float(hpo.get_ic(str(hid))))
+    return float(sum(ic < 2.0 for ic in ics) / len(ics)) if ics else 0.0
 
 
 def score_candidates(
@@ -152,8 +132,6 @@ def score_candidates(
     else:
         base_weights = dict(base_weights)
 
-    has_genes = bool(gene_mentions) or bool(vcf_summary)
-    has_vcf_positive = any(str(g.get("result", "")).lower().find("pos") != -1 for g in vcf_summary)
     family_mentions = [
         to_dict(m)
         for m in (patient_state.phenotype_mentions_text or [])
@@ -165,26 +143,47 @@ def score_candidates(
         demographics.get("age", {}).get("value") if isinstance(demographics.get("age"), dict) else demographics.get("age"),
         demographics.get("ethnicity", {}).get("value") if isinstance(demographics.get("ethnicity"), dict) else demographics.get("ethnicity"),
     ])
-    has_cases = bool(cases_scores)
+    weights = dict(base_weights)
 
-    if cfg.scoring.use_adaptive_weights:
-        weights = _adaptive_weights(
-            base_weights,
-            has_genes=has_genes,
-            has_family=has_family,
-            has_demographics=has_demographics,
-            has_cases=has_cases,
-            n_patient_hpos=len(present_hpos),
-            has_vcf_positive=has_vcf_positive,
-        )
-    else:
-        weights = base_weights
-
-    logger.info(f"Adaptive weights: {weights}")
+    logger.info(f"Scoring weights: {weights}")
 
     ic_high = cfg.scoring.ic_high_threshold
     if ic_high is None:
         ic_high = hpo.ic_p75
+
+    scoring_cfg = cfg_get(cfg, "scoring", {})
+    use_specific_signal = bool(cfg_get(scoring_cfg, "use_specific_signal", True))
+    use_incongruity_match = bool(cfg_get(scoring_cfg, "use_incongruity_match", True))
+    use_cooccurrence_pairs = bool(cfg_get(scoring_cfg, "use_cooccurrence_pairs", True))
+    use_semantic_similarity = bool(cfg_get(scoring_cfg, "use_semantic_similarity", False))
+    use_phenotype_profile = bool(cfg_get(scoring_cfg, "use_phenotype_profile", False))
+    use_generic_guard = bool(cfg_get(scoring_cfg, "use_generic_guard", False))
+    use_anchor_cluster = bool(cfg_get(scoring_cfg, "use_anchor_cluster", False))
+    semantic_max_disease_hpos = int(cfg_get(scoring_cfg, "semantic_similarity_max_disease_hpos", 80))
+    phenotype_size_cap = int(cfg_get(scoring_cfg, "phenotype_disease_size_norm_cap", 60))
+    gene_evidence_policy = str(
+        cfg_get(scoring_cfg, "gene_evidence_policy", "negative_only")
+    ).strip().lower()
+    phenotype_cfg = PhenotypeScoreConfig(disease_size_norm_cap=phenotype_size_cap)
+    genotype_cfg = GenotypeConfig(evidence_policy=gene_evidence_policy)
+
+    if not use_specific_signal:
+        weights["specific_signal"] = 0.0
+    if not use_incongruity_match:
+        weights["incongruity_match"] = 0.0
+    if not use_cooccurrence_pairs:
+        weights["cooccurrence_pairs"] = 0.0
+    if not use_semantic_similarity:
+        weights["semantic_similarity"] = 0.0
+    if not use_phenotype_profile:
+        weights["phenotype_profile"] = 0.0
+    if not use_generic_guard:
+        weights["generic_guard"] = 0.0
+    if not use_anchor_cluster:
+        weights["anchor_cluster"] = 0.0
+
+    branch_concentration = _case_branch_concentration(present_hpos, hpo)
+    low_ic_fraction = _case_low_ic_fraction(present_hpos, hpo)
 
     # Compute raw per-component scores for every candidate
     rows: List[Dict[str, Any]] = []
@@ -194,12 +193,45 @@ def score_candidates(
         group_name = kg_index.disease_name.get(group_id, group_id)
 
         pheno = phenotype_score(
-            did, present_hpos, negated_hpos, kg_index, kg, hpo, total_candidates, hpo_normalizer=hpo_normalizer
+            did,
+            present_hpos,
+            negated_hpos,
+            kg_index,
+            kg,
+            hpo,
+            total_candidates,
+            hpo_normalizer=hpo_normalizer,
+            cfg=phenotype_cfg,
         )
-        specific = specific_signal_score(did, present_hpos, kg_index, kg, hpo, ic_high) if cfg.scoring.use_specific_signal else {"specific_signal_score": 0.0}
-        incong = incongruity_match_score(did, incongruity, kg_index, hpo) if cfg.scoring.use_incongruity_match else {"incongruity_match_score": 0.0}
-        cooc = cooccurrence_score(did, cooccurrence_candidates) if cfg.scoring.use_cooccurrence_pairs else {"cooccurrence_pairs_score": 0.0}
-        geno = genotype_score(did, kg, gene_mentions, vcf_summary)
+        specific = specific_signal_score(did, present_hpos, kg_index, kg, hpo, ic_high) if use_specific_signal else {"specific_signal_score": 0.0}
+        incong = incongruity_match_score(did, incongruity, kg_index, hpo) if use_incongruity_match else {"incongruity_match_score": 0.0}
+        cooc = cooccurrence_score(did, cooccurrence_candidates) if use_cooccurrence_pairs else {"cooccurrence_pairs_score": 0.0}
+        semantic = (
+            semantic_similarity_score(did, present_hpos, kg_index, hpo, max_disease_hpos=semantic_max_disease_hpos)
+            if use_semantic_similarity
+            else {"semantic_similarity_score": 0.0}
+        )
+        profile = (
+            phenotype_profile_score(did, present_hpos, kg_index, kg, hpo)
+            if use_phenotype_profile
+            else {
+                "phenotype_profile_score": 0.0,
+                "profile_patient_recall": 0.0,
+                "profile_unweighted_recall": 0.0,
+                "profile_branch_recall": 0.0,
+                "profile_match_coverage": 0.0,
+                "profile_supportive_cluster": 0.0,
+                "profile_generic_guard": 0.0,
+                "profile_anchor_cluster": 0.0,
+                "profile_high_ic_recall": 0.0,
+                "profile_specific_hit_fraction": 0.0,
+                "profile_match_density": 0.0,
+                "profile_matched_count": 0,
+                "profile_supportive_matches": 0,
+                "profile_matched_branches": 0,
+            }
+        )
+        geno = genotype_score(did, kg, gene_mentions, vcf_summary, cfg=genotype_cfg)
         demo = demographics_score(did, demographics, kg, ethnicity_normalized) if has_demographics else {"demographics_score": 0.0}
         cases = cases_scores.get(did, 0.0)
 
@@ -224,6 +256,24 @@ def score_candidates(
             "raw_specific_signal_score": specific["specific_signal_score"],
             "raw_incongruity_match_score": incong["incongruity_match_score"],
             "raw_cooccurrence_pairs_score": cooc["cooccurrence_pairs_score"],
+            "raw_semantic_similarity_score": semantic["semantic_similarity_score"],
+            "raw_phenotype_profile_score": profile["phenotype_profile_score"],
+            "raw_generic_guard_score": profile.get("profile_generic_guard", 0.0) if use_generic_guard else 0.0,
+            "raw_anchor_cluster_score": profile.get("profile_anchor_cluster", 0.0) if use_anchor_cluster else 0.0,
+            "profile_patient_recall": profile.get("profile_patient_recall", 0.0),
+            "profile_unweighted_recall": profile.get("profile_unweighted_recall", 0.0),
+            "profile_branch_recall": profile.get("profile_branch_recall", 0.0),
+            "profile_match_coverage": profile.get("profile_match_coverage", 0.0),
+            "profile_supportive_cluster": profile.get("profile_supportive_cluster", 0.0),
+            "profile_high_ic_recall": profile.get("profile_high_ic_recall", 0.0),
+            "profile_specific_hit_fraction": profile.get("profile_specific_hit_fraction", 0.0),
+            "profile_match_density": profile.get("profile_match_density", 0.0),
+            "profile_matched_count": profile.get("profile_matched_count", 0),
+            "profile_supportive_matches": profile.get("profile_supportive_matches", 0),
+            "profile_matched_branches": profile.get("profile_matched_branches", 0),
+            "case_n_patient_hpos": len(present_hpos),
+            "case_branch_concentration": branch_concentration,
+            "case_low_ic_fraction": low_ic_fraction,
             "matched_hpo_count": len(pheno.get("matched_hpos", [])),
             "matched_gene_count": geno.get("gene_count", 0),
         })
@@ -239,24 +289,44 @@ def score_candidates(
             "family_gene_support", "family_disease_support", "family_phenotype_support",
             "family_system_support",
             "raw_cases_score", "raw_specific_signal_score", "raw_incongruity_match_score",
-            "raw_cooccurrence_pairs_score", "matched_hpo_count", "matched_gene_count",
+            "raw_cooccurrence_pairs_score", "raw_semantic_similarity_score",
+            "raw_phenotype_profile_score", "raw_generic_guard_score", "raw_anchor_cluster_score",
+            "profile_patient_recall", "profile_unweighted_recall",
+            "profile_branch_recall", "profile_match_coverage", "profile_supportive_cluster",
+            "profile_high_ic_recall", "profile_specific_hit_fraction", "profile_match_density",
+            "profile_matched_count", "profile_supportive_matches", "profile_matched_branches",
+            "matched_hpo_count", "matched_gene_count",
             "phenotype_score", "cases_score", "genotype_score", "inheritance_score",
             "family_evidence_score",
             "demographics_score", "specific_signal_score", "incongruity_match_score",
-            "cooccurrence_pairs_score", "total_score", "rank",
+            "cooccurrence_pairs_score", "semantic_similarity_score",
+            "phenotype_profile_score", "generic_guard_score", "anchor_cluster_score",
+            "total_score", "rank",
         ]
         return pd.DataFrame(columns=empty_cols)
 
     # Rescale
     df["phenotype_score"] = _log_min_max_rescale(df["raw_phenotype_score"].values.astype(float), tie_floor=0.0)
     df["cases_score"] = _log_min_max_rescale(df["raw_cases_score"].values.astype(float), tie_floor=0.0)
-    df["genotype_score"] = _min_max_rescale(df["raw_genotype_score"].values.astype(float), tie_floor=0.0)
+    if gene_evidence_policy == "negative_only":
+        raw_genotype = df["raw_genotype_score"].values.astype(float)
+        neg = np.minimum(raw_genotype, 0.0)
+        scale = abs(float(neg.min())) if len(neg) and neg.min() < 0 else 1.0
+        df["genotype_score"] = neg / scale
+    else:
+        df["genotype_score"] = _min_max_rescale(
+            df["raw_genotype_score"].values.astype(float), tie_floor=0.0
+        )
     df["family_evidence_score"] = 0.0
     df["inheritance_score"] = 0.0
     df["demographics_score"] = _min_max_rescale(df["raw_demographics_score"].values.astype(float), tie_floor=0.0)
     df["specific_signal_score"] = _min_max_rescale(df["raw_specific_signal_score"].values.astype(float), tie_floor=0.0)
     df["incongruity_match_score"] = _min_max_rescale(df["raw_incongruity_match_score"].values.astype(float), tie_floor=0.0)
     df["cooccurrence_pairs_score"] = _min_max_rescale(df["raw_cooccurrence_pairs_score"].values.astype(float), tie_floor=0.0)
+    df["semantic_similarity_score"] = _min_max_rescale(df["raw_semantic_similarity_score"].values.astype(float), tie_floor=0.0)
+    df["phenotype_profile_score"] = _min_max_rescale(df["raw_phenotype_profile_score"].values.astype(float), tie_floor=0.0)
+    df["generic_guard_score"] = _min_max_rescale(df["raw_generic_guard_score"].values.astype(float), tie_floor=0.0)
+    df["anchor_cluster_score"] = _min_max_rescale(df["raw_anchor_cluster_score"].values.astype(float), tie_floor=0.0)
 
     # Combine
     def _total(row: pd.Series) -> float:
@@ -269,6 +339,10 @@ def score_candidates(
             + weights.get("specific_signal", 0.0) * row["specific_signal_score"]
             + weights.get("incongruity_match", 0.0) * row["incongruity_match_score"]
             + weights.get("cooccurrence_pairs", 0.0) * row["cooccurrence_pairs_score"]
+            + weights.get("semantic_similarity", 0.0) * row["semantic_similarity_score"]
+            + weights.get("phenotype_profile", 0.0) * row["phenotype_profile_score"]
+            + weights.get("generic_guard", 0.0) * row["generic_guard_score"]
+            + weights.get("anchor_cluster", 0.0) * row["anchor_cluster_score"]
         )
 
     df["total_score"] = df.apply(_total, axis=1)

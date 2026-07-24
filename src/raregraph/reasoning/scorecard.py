@@ -32,8 +32,10 @@ def build_scorecard(
         adjusted_rank = int(row.get("adjusted_rank", composite_rank))
         reranked_rank = int(row.get("reranked_rank_subtype", adjusted_rank))
         reconciled_rank = int(row.get("reconciled_rank", reranked_rank))
+        final_rank = int(row.get("final_rank", reconciled_rank))
+        final_score = float(row.get("final_score", row.get("reconciled_score", 0.0)))
 
-        total_change = composite_rank - reconciled_rank if composite_rank and reconciled_rank else 0
+        total_change = composite_rank - final_rank if composite_rank and final_rank else 0
 
         # Rank change driver attribution
         drivers = []
@@ -61,6 +63,10 @@ def build_scorecard(
             "adjusted_rank": adjusted_rank,
             "reranked_rank": reranked_rank,
             "reconciled_rank": reconciled_rank,
+            "final_rank": final_rank,
+            "final_score": final_score,
+            "final_fusion_original_weight": float(row.get("final_fusion_original_weight", 0.0)),
+            "final_fusion_reconciled_weight": float(row.get("final_fusion_reconciled_weight", 0.0)),
             "total_rank_change": total_change,
             "audit_plausibility": audit.get("plausibility", "not_audited"),
             "supporting_evidence": audit.get("supporting_evidence", []),
@@ -94,6 +100,8 @@ def build_scorecard(
         "reconciled": {
             "top_group": reconciled.get("top_group"),
             "top_subtype": reconciled.get("top_subtype"),
+            "final_top_subtype": reconciled.get("final_top_subtype"),
+            "final_ranking": reconciled.get("final_ranking"),
             "disagreement": reconciled.get("disagreement", False),
             "tiebreaker": reconciled.get("tiebreaker"),
             "method": reconciled.get("method", "n/a"),
@@ -117,7 +125,12 @@ def format_scorecard_text(scorecard: Dict[str, Any]) -> str:
     lines.append("")
 
     rec = scorecard.get("reconciled", {})
-    if rec.get("top_subtype"):
+    if rec.get("final_top_subtype"):
+        ts = rec["final_top_subtype"]
+        final_info = rec.get("final_ranking", {}) or {}
+        method = final_info.get("method", "final")
+        lines.append(f"TOP CANDIDATE ({method}): {ts.get('disease_name')} ({ts.get('disease_id')})")
+    elif rec.get("top_subtype"):
         ts = rec["top_subtype"]
         lines.append(f"TOP CANDIDATE (reconciled): {ts.get('disease_name')} ({ts.get('disease_id')})")
     if rec.get("top_group"):
@@ -144,9 +157,12 @@ def format_scorecard_text(scorecard: Dict[str, Any]) -> str:
         lines.append(f"{i}. {c['disease_name']} ({c['disease_id']})")
         lines.append(
             f"   ranks: composite={c['composite_rank']} → audit={c['adjusted_rank']} "
-            f"→ pairwise={c['reranked_rank']} → final={c['reconciled_rank']} "
+            f"→ pairwise={c['reranked_rank']} → reconciled={c['reconciled_rank']} "
+            f"→ final={c['final_rank']} "
             f"(change: {c['total_rank_change']:+d})"
         )
+        if c.get("final_score"):
+            lines.append(f"   final score: {c['final_score']:.3f}")
         lines.append(f"   audit: {c['audit_plausibility']}")
         if c.get("llm_validation_score"):
             lines.append(f"   llm validation score: {c['llm_validation_score']:+.2f}")
@@ -239,5 +255,21 @@ def build_rank_trajectory(
     # Rank change
     if "reconciled_rank" in merged.columns:
         merged["rank_change_total"] = merged["rank"] - merged["reconciled_rank"]
+
+    # Final calibrated rank
+    final_df = reconciled.get("final_df")
+    if isinstance(final_df, pd.DataFrame) and "final_rank" in final_df.columns:
+        final_cols = [
+            "disease_id", "final_rank", "final_score",
+            "final_original_score_norm", "final_reconciled_score_norm",
+            "final_fusion_original_weight", "final_fusion_reconciled_weight",
+            "final_fusion_method",
+        ]
+        final_cols = [c for c in final_cols if c in final_df.columns]
+        merged = merged.merge(
+            final_df[final_cols].drop_duplicates("disease_id"),
+            on="disease_id", how="left",
+        )
+        merged["rank_change_total"] = merged["rank"] - merged["final_rank"]
 
     return merged

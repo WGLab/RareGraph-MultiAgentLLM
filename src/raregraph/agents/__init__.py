@@ -1,4 +1,4 @@
-from .context_flags import add_context_flags, flag_sentence
+from .context_flags import add_context_flags, flag_sentence, sanitize_note_for_extraction
 from .text_agents import (
     run_phenotype_extractor_batch,
     run_demographics_extractor_batch,
@@ -12,7 +12,7 @@ from .vision_agents import (
 )
 
 __all__ = [
-    "add_context_flags", "flag_sentence",
+    "add_context_flags", "flag_sentence", "sanitize_note_for_extraction",
     "run_phenotype_extractor_batch",
     "run_demographics_extractor_batch",
     "run_family_history_extractor_batch",

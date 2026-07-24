@@ -32,6 +32,13 @@ logger = logging.getLogger(__name__)
 PLAUSIBILITY_ORDER = {"strong": 3, "moderate": 2, "weak": 1, "implausible": 0}
 
 
+def _pairwise_cfg(cfg: Any, key: str, default: Any) -> Any:
+    pairwise_cfg = getattr(cfg, "pairwise", {})
+    if isinstance(pairwise_cfg, dict):
+        return pairwise_cfg.get(key, default)
+    return getattr(pairwise_cfg, key, default)
+
+
 def _jaccard(a: set, b: set) -> float:
     if not a and not b:
         return 0.0
@@ -317,6 +324,100 @@ def should_skip_pair(
     return False
 
 
+def _patient_hpo_ids(patient_state: Any) -> List[str]:
+    out: List[str] = []
+    seen = set()
+    for item in getattr(patient_state, "normalized_hpo", []) or []:
+        h = to_dict(item)
+        if not h.get("present", True):
+            continue
+        hid = h.get("hpo_id")
+        if hid and hid not in seen:
+            seen.add(hid)
+            out.append(str(hid))
+    return out
+
+
+def _branch_concentration(patient_hpos: List[str], hpo_ontology: Any) -> float:
+    branch_counts: Dict[str, int] = {}
+    for hid in patient_hpos:
+        branches = hpo_ontology.get_branches(hid)
+        if not branches:
+            branch_counts["NO_BRANCH"] = branch_counts.get("NO_BRANCH", 0) + 1
+        for branch in branches:
+            branch_counts[branch] = branch_counts.get(branch, 0) + 1
+    total = sum(branch_counts.values())
+    return float(max(branch_counts.values()) / total) if total else 0.0
+
+
+def resolve_pairwise_top_n(
+    patient_state: Any,
+    ranked_df: pd.DataFrame,
+    hpo_ontology: Any,
+    cfg: Any,
+    frontier_flags: Optional[Dict[str, Dict[str, Any]]] = None,
+    track: str = "subtype",
+) -> int:
+    """Return pairwise window size.
+
+    The default floor remains cfg.pairwise.top_n, usually 30. If enabled, the
+    window expands up to cfg.pairwise.dynamic_max_top_n, usually 50, only when
+    the current case has evidence that the truth could plausibly sit just
+    outside Top-30.
+    """
+    base_n = int(_pairwise_cfg(cfg, "top_n", 30))
+    max_n = int(_pairwise_cfg(cfg, "dynamic_max_top_n", 50))
+    if len(ranked_df) <= base_n:
+        return min(base_n, len(ranked_df))
+    if not bool(_pairwise_cfg(cfg, "dynamic_top_n_enabled", False)):
+        return min(base_n, len(ranked_df))
+
+    max_n = min(max(base_n, max_n), len(ranked_df))
+    patient_hpos = _patient_hpo_ids(patient_state)
+    branch_conc = _branch_concentration(patient_hpos, hpo_ontology)
+    sparse_threshold = int(_pairwise_cfg(cfg, "dynamic_sparse_hpo_threshold", 8))
+    branch_threshold = float(_pairwise_cfg(cfg, "dynamic_branch_concentration_threshold", 0.75))
+    score_ratio_threshold = float(_pairwise_cfg(cfg, "dynamic_rank30_score_ratio_threshold", 0.70))
+
+    score_col = "adjusted_score" if "adjusted_score" in ranked_df.columns else "total_score"
+    score_ratio = 0.0
+    if score_col in ranked_df.columns and len(ranked_df) >= base_n:
+        top_score = float(ranked_df.iloc[0].get(score_col, 0.0) or 0.0)
+        base_score = float(ranked_df.iloc[base_n - 1].get(score_col, 0.0) or 0.0)
+        if top_score > 0:
+            score_ratio = base_score / top_score
+
+    frontier_flags = frontier_flags or {}
+    frontier_outside_base = False
+    if frontier_flags and max_n > base_n and "disease_id" in ranked_df.columns:
+        tail_ids = set(str(x) for x in ranked_df.iloc[base_n:max_n]["disease_id"].tolist())
+        frontier_outside_base = any(str(did) in tail_ids for did in frontier_flags)
+
+    reasons = []
+    if len(patient_hpos) <= sparse_threshold:
+        reasons.append(f"sparse_hpos={len(patient_hpos)}")
+    if branch_conc >= branch_threshold:
+        reasons.append(f"branch_concentration={branch_conc:.2f}")
+    if score_ratio >= score_ratio_threshold:
+        reasons.append(f"rank{base_n}_score_ratio={score_ratio:.2f}")
+    if frontier_outside_base:
+        reasons.append("frontier_flag_in_tail")
+
+    if reasons:
+        logger.info(
+            f"Pairwise ({track}): dynamic Top-N expanded {base_n}->{max_n} "
+            f"because {', '.join(reasons)}"
+        )
+        return max_n
+
+    logger.info(
+        f"Pairwise ({track}): dynamic Top-N kept at {base_n} "
+        f"(hpos={len(patient_hpos)}, branch_concentration={branch_conc:.2f}, "
+        f"rank{base_n}_score_ratio={score_ratio:.2f})"
+    )
+    return base_n
+
+
 def run_pairwise_batch(
     llm: Any,
     patient_state: Any,
@@ -334,7 +435,14 @@ def run_pairwise_batch(
     prompt_path = Path(prompt_dir)
     frontier_flags = frontier_flags or {}
 
-    top_n = cfg.pairwise.top_n
+    top_n = resolve_pairwise_top_n(
+        patient_state,
+        ranked_df,
+        hpo_ontology,
+        cfg,
+        frontier_flags=frontier_flags,
+        track=track,
+    )
     subset = ranked_df.head(top_n).reset_index(drop=True)
 
     audit_by_id = {a["disease_id"]: a for a in audit_results}

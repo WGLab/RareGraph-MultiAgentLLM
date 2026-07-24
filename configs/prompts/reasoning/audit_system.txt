@@ -61,6 +61,8 @@ REASONING GUIDELINES
 - A high-IC (specific) feature match is worth more than several low-IC matches.
 - An incongruous feature (one that doesn't fit the dominant picture) that the candidate EXPLAINS is a strong positive signal.
 - A hallmark feature the patient EXPLICITLY LACKS is a meaningful negative.
+- A hallmark feature that is simply not recorded in a sparse HPO-only patient list is NOT a contradiction.
+- Treat benchmark HPO lists as partial observations: missing documentation means unknown, not absent.
 - Absent-but-expected features for which the patient may simply be "too young" are NOT contradictions.
 - Shared-across-many-diseases features are weaker than rare, discriminating features.
 

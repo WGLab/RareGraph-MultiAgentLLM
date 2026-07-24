@@ -12,6 +12,9 @@ For each disease, assess:
 
 Weight the decision by how well each disease EXPLAINS the patient's full picture.
 An incongruous feature that only one candidate explains is a strong signal for it.
+Sparse HPO-only benchmark inputs are partial observations: do not penalize a disease
+just because one of its hallmarks is not documented, unless the patient explicitly
+negates that hallmark.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 OUTPUT (strict JSON)

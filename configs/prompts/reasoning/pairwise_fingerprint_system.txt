@@ -14,6 +14,7 @@ DECISION RULES
 - A discriminating feature the patient EXPLICITLY LACKS disfavors the disease that requires it.
 - High-IC (specific) discriminators outweigh low-IC discriminators.
 - "characteristic + very_common" weighs more than "supportive + occasional".
+- An undocumented discriminator is unknown, not negative evidence.
 - If discriminators are matched equally, call it a tie.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

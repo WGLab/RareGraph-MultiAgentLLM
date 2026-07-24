@@ -39,21 +39,21 @@ paths:
 # ============================================================
 models:
   text_llm:
-    model_name: Qwen/Qwen3-8B #"google/medgemma-27b-it" #"Qwen/Qwen3-8B"
+    model_name: "Qwen/Qwen3-8B" #"google/medgemma-27b-it" 
     temperature: 0.2
     max_tokens: 10000
     tensor_parallel_size: 1
     gpu_memory_utilization: 0.85
-    max_batch_size: 64
+    max_batch_size: 128
     thinking: false
 
   vision_llm:
-    model_name: "Qwen/Qwen3.5-2B"
+    model_name: "Qwen/Qwen3-VL-8B-Instruct"
     temperature: 0.2
     max_tokens: 500
     tensor_parallel_size: 1
     gpu_memory_utilization: 0.85
-    max_batch_size: 4
+    max_batch_size: 15
 
 # ============================================================
 # Vision runtime
@@ -88,27 +88,43 @@ normalization:
 expansion:
   mode: "ic_gated"                # "ic_gated" | "fixed_degree"
   max_expansion_depth: 1
+  low_ic_threshold: 3.5            # IC < 3.5: expand children + siblings
+  medium_ic_threshold: 5.0         # 3.5 <= IC < 5.0: expand children only; >=5 no expansion
 
 # ============================================================
 # Scoring (Stage 3)
 # ============================================================
 scoring:
-  # Per-component toggles for ablation
+  # Final production formula selected from the Stage 3 sweep.
   use_specific_signal: true       # high-IC hallmark match bonus
-  use_incongruity_match: true     # bridges dominant + outlier branches
+  use_incongruity_match: false    # diagnostic: useful to inspect, but over-amplified false positives in benchmarks
   use_cooccurrence_pairs: true    # rare phenotype-pair retrieval
-  use_adaptive_weights: true      # zero-weight components with no input data
-  # Base component weights (used directly when adaptive_weights is false;
-  # scaled based on evidence availability when true)
+  use_semantic_similarity: true   # HPO MICA best-match-average rescue signal
+  use_phenotype_profile: true     # coverage-aware patient-profile rescue signal
+  use_generic_guard: true         # downweights broad/generic HPO-only explanations
+  use_anchor_cluster: true        # rewards coherent multi-feature high-IC support
+  gene_evidence_policy: "negative_only"  # "negative_only" demotes only; "status_aware" restores positive/unknown bonuses
+
+  # Base component weights.
   weights:
-    phenotype: 4.0
+    phenotype: 2.0
     genotype: 3.0
     family_evidence: 1.0
     demographics: 1.0
     cases: 1.0
-    specific_signal: 2.0
-    incongruity_match: 2.0
-    cooccurrence_pairs: 1.5
+    specific_signal: 0.5
+    incongruity_match: 0.0
+    cooccurrence_pairs: 0.5
+    semantic_similarity: 1.0
+    phenotype_profile: 3.75
+    generic_guard: 1.0
+    anchor_cluster: 0.5
+
+  # Bounded CPU-only phenotype similarity.
+  semantic_similarity_max_disease_hpos: 80
+
+  # Disease-size cap for phenotype_score normalization.
+  phenotype_disease_size_norm_cap: 30
 
   # Minimum IC to treat a patient HPO as "high-IC" (used in specific_signal).
   # Uses an absolute threshold to avoid sparse frequency metadata suppressing the signal.
@@ -120,11 +136,11 @@ scoring:
 retrieval:
   # Broad deterministic candidate pool before composite scoring.
   # This is cheap relative to LLM stages.
-  initial_top_k: 2000
+  initial_top_k: 5000
 
   # Number of Stage 3 scored candidates retained for downstream tables,
   # family-evidence shortlisting, and possible later rescue/debugging.
-  retain_top_k: 300
+  retain_top_k: 500
 
 # ============================================================
 # Frontier consultation (Stage 4) — CONDITIONAL, at most 1 API call per patient
@@ -180,6 +196,11 @@ audit:
 # ============================================================
 pairwise:
   top_n: 30                       # candidates entering pairwise
+  dynamic_top_n_enabled: true      # always include Top-30; optionally expand to Top-50
+  dynamic_max_top_n: 50
+  dynamic_sparse_hpo_threshold: 8
+  dynamic_branch_concentration_threshold: 0.75
+  dynamic_rank30_score_ratio_threshold: 0.70
   skip_large_gaps: true           # skip pairs with audit-category gap >= 2
   skip_score_gap_multiplier: 2.0  # skip if scoreA > scoreB * this
   adaptive_prompts: true          # fingerprint vs differential vs card-based
@@ -205,6 +226,17 @@ reconciliation:
   alpha_group_hallmarks: 1.0      # when group hallmarks dominate
   alpha_default: 0.5
   tiebreaker_on_disagreement: true
+
+# ============================================================
+# Final ranking calibration (after Stage 8)
+# ============================================================
+final_ranking:
+  enabled: true
+  method: "score_fusion"
+  original_weight: 0.65
+  reconciled_weight: 0.35
+  score_col_original: "total_score"
+  score_col_reconciled: "reconciled_score"
 
 # ============================================================
 # External retrieval

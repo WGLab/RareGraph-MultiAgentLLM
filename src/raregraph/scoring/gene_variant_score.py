@@ -18,6 +18,7 @@ class GenotypeConfig:
     lr_variant_negative: float = 0.2
     lr_gene_negative: float = 0.5
     lr_gene_unknown: float = 3.0
+    evidence_policy: str = "negative_only"  # "negative_only" | "status_aware"
 
 
 def _norm_gene(g: Any) -> str:
@@ -105,7 +106,9 @@ def genotype_score(
         result = str(e.get("result") or "").lower()
         variant_hit = _variant_match(_norm_variant(variant), kg_variants.get(g, []))
 
-        if "pos" in result:
+        if cfg.evidence_policy == "negative_only" and "neg" not in result:
+            lr = 1.0
+        elif "pos" in result:
             lr = cfg.lr_variant_positive if variant_hit else cfg.lr_gene_positive
         elif "neg" in result:
             lr = cfg.lr_variant_negative if variant_hit else cfg.lr_gene_negative

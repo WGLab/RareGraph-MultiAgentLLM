@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 NULL_PRIOR = {"AD": 0.0, "AR": 0.0, "XLR": 0.0, "XLD": 0.0, "Mito": 0.0}
 
 
-def _contains_any(haystack: str, needles: List[str]) -> bool:
-    s = haystack.lower()
+def _contains_any(haystack: Any, needles: List[str]) -> bool:
+    s = str(haystack or "").lower()
     return any(n in s for n in needles)
 
 

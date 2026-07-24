@@ -131,6 +131,63 @@ def _repair_truncated_json(s: str, prefer: str = "any") -> str | None:
     return candidate
 
 
+def _salvage_complete_array_items(s: str) -> list[Any] | None:
+    """Return complete JSON object items from a truncated top-level array.
+
+    This intentionally ignores the final partial object instead of inventing
+    missing text. It is most useful for extractor outputs where one cut-off
+    final item should not discard every earlier phenotype/test/gene item.
+    """
+    start = s.find("[")
+    if start == -1:
+        return None
+
+    items: list[Any] = []
+    obj_start: int | None = None
+    stack: list[str] = []
+    in_str = False
+    escape = False
+
+    for i in range(start + 1, len(s)):
+        ch = s[i]
+        if in_str:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+            continue
+        if ch in "{[":
+            if ch == "{" and not stack:
+                obj_start = i
+            stack.append("}" if ch == "{" else "]")
+            continue
+        if ch in "}]":
+            if not stack or stack[-1] != ch:
+                if ch == "]" and not stack:
+                    break
+                return items or None
+            stack.pop()
+            if obj_start is not None and not stack:
+                raw_item = s[obj_start : i + 1]
+                cleaned = re.sub(r",(\s*[}\]])", r"\1", raw_item)
+                for loader in (orjson.loads, json.loads):
+                    try:
+                        item = loader(cleaned)
+                        if isinstance(item, dict):
+                            items.append(item)
+                        break
+                    except Exception:
+                        pass
+                obj_start = None
+
+    return items or None
+
+
 def safe_json_load(s: str, prefer: str = "any") -> Any:
     """Best-effort JSON parse.
 
@@ -187,6 +244,10 @@ def safe_json_load(s: str, prefer: str = "any") -> Any:
                     return loader(sub)
                 except Exception:
                     pass
+
+        salvaged = _salvage_complete_array_items(s)
+        if salvaged:
+            return salvaged
 
     # last-resort cleanup
     cleaned = re.sub(r",(\s*[}\]])", r"\1", s)  # remove trailing commas

@@ -20,6 +20,8 @@ def retrieve_by_hpo(
     hpo: HpoOntology,
     expansion_mode: str = "ic_gated",
     max_depth: int = 1,
+    low_ic_threshold: float = 3.5,
+    medium_ic_threshold: float = 5.0,
 ) -> Dict[str, Dict[str, Any]]:
     """Return candidate_id → retrieval info (matched hpos, credit sum)."""
     candidates: Dict[str, Dict[str, Any]] = {}
@@ -27,7 +29,14 @@ def retrieve_by_hpo(
         hid = p.get("hpo_id")
         if not hid:
             continue
-        expansions = ic_gated_expand(hid, hpo, mode=expansion_mode, max_depth=max_depth)
+        expansions = ic_gated_expand(
+            hid,
+            hpo,
+            mode=expansion_mode,
+            max_depth=max_depth,
+            low_ic_threshold=low_ic_threshold,
+            medium_ic_threshold=medium_ic_threshold,
+        )
         for exp in expansions:
             diseases = kg_index.hpo_to_diseases_all.get(exp.hpo_id, set())
             for did in diseases:

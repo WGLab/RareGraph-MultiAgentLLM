@@ -13,6 +13,8 @@ Output:
   <output_dir>/<dataset>/<case_id>/rank_trajectory.tsv
 """
 from __future__ import annotations
+import os
+import math
 
 import argparse
 import logging
@@ -62,6 +64,37 @@ def _discover_case_ids(input_root: Path) -> set:
 
 def _cfg_get(obj, key: str, default=None):
     return getattr(obj, key, obj.get(key, default) if isinstance(obj, dict) else default)
+def _is_case_completed(case_out: Path, completion_file: str = "stage9_scorecard.json") -> bool:
+    """A case is complete only if the final expected output file exists."""
+    return (case_out / completion_file).exists()
+
+
+def _select_array_shard(items: list, array_index: int | None, array_count: int | None) -> list:
+    """Split items into array_count chunks.
+
+    Uses 1-based SLURM-style array index by default.
+    The last shard receives the remainder.
+    Example for --array=1-2:
+      task 1 gets first half
+      task 2 gets remaining half
+    """
+    if not array_index or not array_count or array_count <= 1:
+        return items
+
+    if array_index < 1 or array_index > array_count:
+        raise ValueError(f"array_index must be between 1 and {array_count}; got {array_index}")
+
+    n = len(items)
+    base = n // array_count
+
+    if array_index < array_count:
+        start = (array_index - 1) * base
+        end = array_index * base
+    else:
+        start = (array_index - 1) * base
+        end = n
+
+    return items[start:end]
 
 
 def _maybe_trigger_genomics(
@@ -92,6 +125,11 @@ def main() -> int:
     parser.add_argument("--dataset", default=None, help="Dataset subfolder name (e.g. 'demo')")
     parser.add_argument("--input_dir", default="inputs")
     parser.add_argument("--output_dir", default="outputs")
+    parser.add_argument(
+        "--text_model",
+        default=None,
+        help="Override models.text_llm.model_name from the config.",
+    )
     parser.add_argument("--case_id", default=None, help="Process a single case by ID")
     parser.add_argument("--limit", type=int, default=None, help="Max cases to process")
     parser.add_argument(
@@ -128,25 +166,36 @@ def main() -> int:
             "{input_root}, {output_root}, {results_dir}."
         ),
     )
-    parser.add_argument(
-        "--text_model",
-        default=None,
-        help=(
-            "Override cfg.models.text_llm.model_name at runtime. "
-            "If omitted, the value from the config file is used. "
-            "Example: 'meta-llama/Llama-3.1-8B-Instruct'"
-        ),
-    )
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument(
+        "--skip_completed",
+        action="store_true",
+        help="Skip cases with completed final output already present.",
+    )
+    parser.add_argument(
+        "--completion_file",
+        default="stage9_scorecard.json",
+        help="File inside each case output folder used to decide whether the case is complete.",
+    )
+    parser.add_argument(
+        "--array_index",
+        type=int,
+        default=int(os.environ["SLURM_ARRAY_TASK_ID"]) if os.environ.get("SLURM_ARRAY_TASK_ID") else None,
+        help="1-based array task index. Defaults to SLURM_ARRAY_TASK_ID if present.",
+    )
+    parser.add_argument(
+        "--array_count",
+        type=int,
+        default=int(os.environ["SLURM_ARRAY_TASK_COUNT"]) if os.environ.get("SLURM_ARRAY_TASK_COUNT") else None,
+        help="Total number of array tasks. Defaults to SLURM_ARRAY_TASK_COUNT if present.",
+    )
+
     args = parser.parse_args()
 
     logger = setup_logger(level=logging.DEBUG if args.verbose else logging.INFO)
     cfg = load_config(args.config)
-
-    # --- Runtime overrides (applied after config load, before model is loaded) ---
     if args.text_model:
         cfg.models.text_llm.model_name = args.text_model
-        logger.info(f"CLI override: cfg.models.text_llm.model_name → {args.text_model}")
 
     dataset = args.dataset or cfg.project.dataset
     input_root = Path(args.input_dir) / dataset
@@ -172,7 +221,29 @@ def main() -> int:
         )
         return 1
 
-    logger.info(f"Will process {len(case_ids)} cases")
+    logger.info(f"Discovered {len(case_ids)} cases")
+
+    if args.skip_completed:
+        before = len(case_ids)
+        case_ids = [
+            cid for cid in case_ids
+            if not _is_case_completed(output_root / cid, args.completion_file)
+        ]
+        logger.info(
+            f"Skipping completed cases using {args.completion_file}: "
+            f"{before - len(case_ids)} skipped, {len(case_ids)} remaining"
+        )
+
+    case_ids = _select_array_shard(case_ids, args.array_index, args.array_count)
+
+    logger.info(
+        f"Array shard: index={args.array_index}, count={args.array_count}; "
+        f"this job will process {len(case_ids)} cases"
+    )
+
+    if not case_ids:
+        logger.info("No remaining cases for this shard. Exiting cleanly.")
+        return 0
 
     case_inputs = []
     for cid in case_ids:

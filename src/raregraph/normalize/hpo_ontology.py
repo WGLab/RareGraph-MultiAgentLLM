@@ -2,13 +2,13 @@
 
 Provides:
   - Term name lookup
-  - Information content (IC) computation from HPO annotation frequency
+  - Information content (IC) computation from RareGraph KG annotation frequency
   - Top-level organ-system branch lookup per HPO term
   - Global IC statistics (median, p25, p75)
 
-The IC calculation uses the HPO annotation file (phenotype_to_genes or
-phenotype.hpoa) when available; otherwise falls back to a simpler depth-based
-proxy.
+The production pipeline calls compute_ic_from_kg(...) after loading the
+RareGraph KG. get_ic(...) then reads those KG-derived IC values; the median
+constant is only a final fallback for unknown terms.
 """
 from __future__ import annotations
 

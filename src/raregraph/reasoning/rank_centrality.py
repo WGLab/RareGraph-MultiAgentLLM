@@ -101,7 +101,18 @@ def aggregate_rank(
     track_name: str = "subtype",
 ) -> pd.DataFrame:
     """Produce a reranked DataFrame using rank centrality + weighted wins blend."""
-    candidates = ranked_df.head(cfg.pairwise.top_n)["disease_id"].tolist()
+    top_n = int(getattr(cfg.pairwise, "top_n", 30))
+    if pairwise_results:
+        observed_max_rank = max(
+            int(r.get("rank_a", 0) or 0)
+            for r in pairwise_results
+        )
+        observed_max_rank = max(
+            observed_max_rank,
+            max(int(r.get("rank_b", 0) or 0) for r in pairwise_results),
+        )
+        top_n = max(top_n, observed_max_rank)
+    candidates = ranked_df.head(top_n)["disease_id"].tolist()
     if not candidates or not pairwise_results:
         df = ranked_df.copy()
         df[f"reranked_rank_{track_name}"] = df.get("adjusted_rank", df.index + 1)

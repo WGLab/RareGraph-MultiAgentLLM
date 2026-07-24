@@ -26,7 +26,9 @@ figures_*/
 MultiAgents_Evals/
 RAG_results/
 testing/
-
+debug/
+new_figures/
+scripts/commands.sh
 # Python caches and build artifacts
 __pycache__/
 *.py[cod]
