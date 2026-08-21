@@ -15,7 +15,7 @@ project:
 paths:
   # Path to the harmonized Mondo/OMIM/Orphanet/GeneReviews KG.
   # This is the large JSON you built. Adjust to your actual path.
-  kg_path: "data/knowledge_graph/Mondo_diseases_KG_combined.json"
+  kg_path: "data/knowledge_graph/Mondo_diseases_KG_combined.gene_diff_fixed.json"
 
   # Full Mondo term dump for disease normalization.
   full_mondo: "data/knowledge_graph/complete_structured_mondo_kg.json"
