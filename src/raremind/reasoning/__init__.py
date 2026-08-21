@@ -9,6 +9,7 @@ from .rank_centrality import aggregate_rank, pagerank, build_win_loss_graph
 from .reconciliation import reconcile
 from .final_fusion import apply_final_fusion
 from .scorecard import build_scorecard, format_scorecard_text, build_rank_trajectory
+from .next_steps import build_next_step_recommendations
 
 __all__ = [
     "run_audit_batch", "apply_audit_multipliers",
@@ -18,4 +19,5 @@ __all__ = [
     "reconcile",
     "apply_final_fusion",
     "build_scorecard", "format_scorecard_text", "build_rank_trajectory",
+    "build_next_step_recommendations",
 ]

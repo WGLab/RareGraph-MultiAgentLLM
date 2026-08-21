@@ -14,20 +14,20 @@ from pathlib import Path
 # Allow running from repo root
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from raregraph.core.config import load_config
-from raregraph.core.logging import setup_logger
+from raremind.core.config import load_config
+from raremind.core.logging import setup_logger
 
-from raregraph.normalize.biolord_embedder import BioLordEmbedder
-from raregraph.normalize.hpo_ontology import HpoOntology
-from raregraph.normalize.normalizers import HpoNormalizer
-from raregraph.normalize.mondo_normalizer import MondoNormalizer
+from raremind.normalize.biolord_embedder import BioLordEmbedder
+from raremind.normalize.hpo_ontology import HpoOntology
+from raremind.normalize.normalizers import HpoNormalizer
+from raremind.normalize.mondo_normalizer import MondoNormalizer
 
-from raregraph.kg.kg_loader import load_kg
-from raregraph.kg.kg_precompute import precompute_kg_index
+from raremind.kg.kg_loader import load_kg
+from raremind.kg.kg_precompute import precompute_kg_index
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build RareGraph indexes")
+    parser = argparse.ArgumentParser(description="Build RareMind knowledge indexes")
     parser.add_argument("--config", default="configs/default.yaml")
     parser.add_argument("--force", action="store_true", help="Rebuild caches from scratch")
     parser.add_argument("--skip-kg", action="store_true", help="Skip KG precomputation")

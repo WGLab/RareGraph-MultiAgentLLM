@@ -8,18 +8,18 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-from raregraph.core.config import AttrDict, retrieval_initial_top_k
-from raregraph.core.logging import setup_logger
-from raregraph.core.state import (
+from raremind.core.config import AttrDict, cfg_get, retrieval_initial_top_k
+from raremind.core.logging import setup_logger
+from raremind.core.state import (
     PatientCaseState, NormalizedPhenotype, TemporalView, IncongruityInfo,
 )
-from raregraph.core.utils import ensure_dir, write_json
+from raremind.core.utils import ensure_dir, write_json
 
-from raregraph.llm.vllm_client import VllmClient
-from raregraph.llm.vllm_vision_client import VllmVisionClient
-from raregraph.llm.vision_api_client import ApiVisionClient
+from raremind.llm.vllm_client import VllmClient
+from raremind.llm.vllm_vision_client import VllmVisionClient
+from raremind.llm.vision_api_client import ApiVisionClient
 
-from raregraph.agents.text_agents import (
+from raremind.agents.text_agents import (
     run_phenotype_extractor_batch,
     run_demographics_extractor_batch,
     run_family_history_extractor_batch,
@@ -27,45 +27,49 @@ from raregraph.agents.text_agents import (
     run_gene_mentions_extractor_batch,
     run_stage1_text_extractors_batch,
 )
-from raregraph.agents.vision_agents import (
+from raremind.agents.vision_agents import (
     run_vision_extractor_batch,
     filter_vision_against_text,
 )
 
-from raregraph.normalize.biolord_embedder import BioLordEmbedder
-from raregraph.normalize.hpo_ontology import HpoOntology
-from raregraph.normalize.normalizers import HpoNormalizer
-from raregraph.normalize.mondo_normalizer import MondoNormalizer
-from raregraph.normalize.temporal_parser import build_temporal_view
-from raregraph.normalize.inheritance_inference import infer_inheritance_prior
-from raregraph.normalize.incongruity_detector import detect_incongruity
-from raregraph.normalize.disease_id_mapper import DiseaseIdMapper
+from raremind.normalize.biolord_embedder import BioLordEmbedder
+from raremind.normalize.hpo_ontology import HpoOntology
+from raremind.normalize.normalizers import HpoNormalizer
+from raremind.normalize.mondo_normalizer import MondoNormalizer
+from raremind.normalize.temporal_parser import build_temporal_view
+from raremind.normalize.inheritance_inference import infer_inheritance_prior
+from raremind.normalize.incongruity_detector import detect_incongruity
+from raremind.normalize.disease_id_mapper import DiseaseIdMapper
 
-from raregraph.kg.kg_loader import load_kg, load_hierarchy
-from raregraph.kg.kg_precompute import precompute_kg_index, KGIndex
-from raregraph.genomics.adapters import discover_genomics_result, load_genomics_results
-from raregraph.pipeline.vision_prefetch import release_vision_client
+from raremind.kg.kg_loader import load_kg, load_hierarchy
+from raremind.kg.kg_precompute import precompute_kg_index, KGIndex
+from raremind.genomics.adapters import discover_genomics_result, load_genomics_results
+from raremind.pipeline.vision_prefetch import release_vision_client
 
-from raregraph.retrieval.hpo_retriever import retrieve_by_hpo
-from raregraph.retrieval.gene_retriever import retrieve_by_gene
-from raregraph.retrieval.cooccurrence_retriever import retrieve_by_cooccurrence
-from raregraph.retrieval.pubcase_finder import search_PubCaseFinder
+from raremind.retrieval.hpo_retriever import retrieve_by_hpo
+from raremind.retrieval.gene_retriever import retrieve_by_gene
+from raremind.retrieval.cooccurrence_retriever import retrieve_by_cooccurrence
+from raremind.retrieval.pubcase_finder import search_PubCaseFinder
 
-from raregraph.scoring.composite_ranker import score_candidates
+from raremind.scoring.composite_ranker import score_candidates
 
-from raregraph.frontier.client import FrontierClient
-from raregraph.frontier.consultation import run_frontier_consultation
+from raremind.frontier.client import FrontierClient
+from raremind.frontier.consultation import run_frontier_consultation
 
-from raregraph.reasoning.audit import run_audit_batch, apply_audit_multipliers
-from raregraph.reasoning.pairwise import run_pairwise_batch
-from raregraph.reasoning.rank_centrality import aggregate_rank
-from raregraph.reasoning.reconciliation import reconcile
-from raregraph.reasoning.final_fusion import apply_final_fusion
-from raregraph.reasoning.scorecard import (
+from raremind.reasoning.audit import run_audit_batch, apply_audit_multipliers
+from raremind.reasoning.pairwise import run_pairwise_batch
+from raremind.reasoning.rank_centrality import aggregate_rank
+from raremind.reasoning.reconciliation import reconcile
+from raremind.reasoning.final_fusion import apply_final_fusion
+from raremind.reasoning.scorecard import (
     build_scorecard, format_scorecard_text, build_rank_trajectory,
 )
+from raremind.reasoning.next_steps import (
+    build_next_step_recommendations,
+    RECOMMENDATION_COLUMNS,
+)
 
-logger = setup_logger("raregraph")
+logger = setup_logger("raremind")
 
 
 SOURCE_PRIORITY = {
@@ -75,7 +79,7 @@ SOURCE_PRIORITY = {
 }
 
 
-class RareGraphHost:
+class RareMindHost:
     def __init__(self, cfg: AttrDict):
         self.cfg = cfg
         self.kg: Dict[str, Dict[str, Any]] = {}
@@ -97,7 +101,7 @@ class RareGraphHost:
     # ---------------------------------------------------------------
     def load(self) -> None:
         """Load KG, ontology, build indexes, load LLMs."""
-        logger.info("=== RareGraphHost.load() ===")
+        logger.info("=== RareMind host load ===")
 
         # Embedder (lazy-loaded model)
         self.embedder = BioLordEmbedder(
@@ -170,7 +174,7 @@ class RareGraphHost:
             )
             logger.info(f"Frontier client ready: provider={self.cfg.frontier.provider}")
 
-        logger.info("=== RareGraphHost.load() complete ===")
+        logger.info("=== RareMind host load complete ===")
 
     def _apply_hierarchy_groups(self) -> None:
         """Apply hierarchy.json group assignments to the KG index.
@@ -352,7 +356,7 @@ class RareGraphHost:
         genomics_result_path: Optional[str] = None,
         output_dir: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Run the full 9-stage pipeline for a single patient."""
+        """Run the full 10-stage RareMind pipeline for a single patient."""
         out_dir = ensure_dir(output_dir or f"outputs/{case_id}")
         logger.info(f"=== Running case {case_id} ===")
 
@@ -503,6 +507,94 @@ class RareGraphHost:
             )
             traj.to_csv(out_dir / "rank_trajectory.tsv", sep="\t", index=False)
 
+        # =================== STAGE 10 ===================
+        logger.info("--- Stage 10: Next-test and next-step recommendations ---")
+        next_cfg = cfg_get(self.cfg, "next_steps", {})
+        next_steps_payload: Dict[str, Any]
+        recommendations = pd.DataFrame(columns=RECOMMENDATION_COLUMNS)
+        if bool(cfg_get(next_cfg, "enabled", True)):
+            disease_top_k = int(cfg_get(next_cfg, "disease_top_k", 10))
+            action_top_k = int(cfg_get(next_cfg, "action_top_k", 10))
+            action_fields = cfg_get(
+                next_cfg, "action_fields", ["testing", "initial_evaluations"]
+            )
+            cluster_threshold = float(
+                cfg_get(next_cfg, "cluster_similarity_threshold", 0.90)
+            )
+            recommendations, _raw_actions, selected_groups, metadata = (
+                build_next_step_recommendations(
+                    final_df=final_df_for_scorecard,
+                    kg=self.kg,
+                    embedder=self.embedder,
+                    disease_top_k=disease_top_k,
+                    action_top_k=action_top_k,
+                    fields=action_fields,
+                    cluster_threshold=cluster_threshold,
+                )
+            )
+            next_steps_payload = {
+                "case_id": case_id,
+                "status": "complete",
+                "metadata": metadata,
+                "source_disease_groups": selected_groups[
+                    [
+                        column for column in (
+                            "final_rank", "group_id", "group_name",
+                            "disease_id", "disease_name",
+                        ) if column in selected_groups.columns
+                    ]
+                ].to_dict("records"),
+                "recommendations": recommendations.to_dict("records"),
+            }
+        else:
+            next_steps_payload = {
+                "case_id": case_id,
+                "status": "disabled",
+                "metadata": {},
+                "source_disease_groups": [],
+                "recommendations": [],
+            }
+
+        # Stage 10 intentionally has one canonical artifact. Recommendation-level
+        # provenance is already represented by the supporting group/disease fields;
+        # run metadata is repeated on each row for a self-contained TSV.
+        stage10_table = recommendations.copy()
+        if stage10_table.empty:
+            stage10_table = pd.DataFrame([
+                {column: pd.NA for column in RECOMMENDATION_COLUMNS}
+            ])
+        stage10_metadata = next_steps_payload.get("metadata", {})
+        context_columns = {
+            "case_id": case_id,
+            "status": next_steps_payload.get("status", "complete"),
+            "disease_top_k": stage10_metadata.get("disease_top_k"),
+            "action_top_k": stage10_metadata.get("action_top_k"),
+            "source_fields": "|".join(stage10_metadata.get("source_fields", [])),
+            "selected_disease_groups": stage10_metadata.get("selected_disease_groups"),
+            "raw_action_mentions": stage10_metadata.get("raw_action_mentions"),
+            "normalization_method": stage10_metadata.get("normalization_method"),
+            "embedding_model": stage10_metadata.get("embedding_model"),
+            "cluster_similarity_threshold": stage10_metadata.get(
+                "cluster_similarity_threshold"
+            ),
+            "source_disease_groups_json": json.dumps(
+                next_steps_payload.get("source_disease_groups", []),
+                ensure_ascii=False,
+                default=str,
+            ),
+        }
+        for column, value in reversed(tuple(context_columns.items())):
+            stage10_table.insert(0, column, value)
+        for legacy_name in (
+            "stage10_next_steps.json",
+            "stage10_next_steps.txt",
+            "stage10_next_step_evidence.tsv",
+        ):
+            (out_dir / legacy_name).unlink(missing_ok=True)
+        stage10_table.to_csv(
+            out_dir / "stage10_next_steps.tsv", sep="\t", index=False
+        )
+
         logger.info(f"=== Case {case_id} done ===")
 
         return {
@@ -510,8 +602,8 @@ class RareGraphHost:
             "top": scorecard.get("top_candidates", [])[:5],
             "output_dir": str(out_dir),
             "reconciled": state.reconciled,
+            "next_steps": next_steps_payload.get("recommendations", []),
         }
-
     # ===============================================================
     # Stage implementations
     # ===============================================================
@@ -1028,3 +1120,8 @@ class RareGraphHost:
         df["rank"] = df.index + 1
         df["adjusted_rank"] = df["rank"]
         return df
+
+
+# Backward-compatible import alias. RareGraph now refers to the knowledge graph;
+# new code should import RareMindHost.
+RareGraphHost = RareMindHost

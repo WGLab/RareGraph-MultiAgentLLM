@@ -1,7 +1,7 @@
 """vLLM text client wrapper with Qwen3 thinking-mode support.
 
 Mirrors the original rare_dx_mcp/llm/vllm_client.py design but trims the long
-capability-detection table to the parts RareGraph uses. If vllm is not
+capability-detection table to the parts RareMind uses. If vllm is not
 installed (e.g., running only extraction via HF), the client lazily defers
 import errors until a chat call is made.
 """

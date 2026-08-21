@@ -1,5 +1,5 @@
 # ============================================================
-# RareGraph default configuration
+# RareMind default configuration
 # ============================================================
 # All pipeline behavior is controlled from this file. The pipeline
 # is designed so that you can switch the frontier consultation between
@@ -8,14 +8,14 @@
 # ============================================================
 
 project:
-  name: "raregraph"
+  name: "raremind"
   outputs_dir: "outputs"
   dataset: "demo"
 
 paths:
   # Path to the harmonized Mondo/OMIM/Orphanet/GeneReviews KG.
   # This is the large JSON you built. Adjust to your actual path.
-  kg_path: "data/knowledge_graph/Mondo_diseases_KG_combined.gene_diff_fixed.json"
+  kg_path: "data/knowledge_graph/Mondo_diseases_KG_combined.json"
 
   # Full Mondo term dump for disease normalization.
   full_mondo: "data/knowledge_graph/complete_structured_mondo_kg.json"
@@ -39,21 +39,21 @@ paths:
 # ============================================================
 models:
   text_llm:
-    model_name: "Qwen/Qwen3-8B" #"google/medgemma-27b-it" 
+    model_name: "google/medgemma-27b-it" #"Qwen/Qwen3-8B"
     temperature: 0.2
     max_tokens: 10000
     tensor_parallel_size: 1
     gpu_memory_utilization: 0.85
-    max_batch_size: 128
+    max_batch_size: 64
     thinking: false
 
   vision_llm:
-    model_name: "Qwen/Qwen3-VL-8B-Instruct"
+    model_name: "Qwen/Qwen3.5-2B"
     temperature: 0.2
     max_tokens: 500
     tensor_parallel_size: 1
     gpu_memory_utilization: 0.85
-    max_batch_size: 15
+    max_batch_size: 4
 
 # ============================================================
 # Vision runtime
@@ -151,7 +151,7 @@ retrieval:
 # Switching between them requires only changing this block.
 # ============================================================
 frontier:
-  enabled:  false                  # master switch
+  enabled:  true                  # master switch
   provider: "local"               # "local" | "openrouter" | "vertexai" | "openai"
 
   # When provider == "local": uses models.text_llm (same vLLM instance)
@@ -263,3 +263,24 @@ output:
   save_rank_trajectory: true
   save_scorecard_txt: true
   save_scorecard_json: true
+
+# ============================================================
+# Next-test and next-step recommendations (Stage 10)
+# ============================================================
+next_steps:
+  enabled: true
+
+  # Use disease groups represented within the global Top-10 final ranking.
+  disease_top_k: 10
+
+  # Return the ten actions supported by the most distinct disease groups.
+  action_top_k: 10
+
+  # RareGraph fields included in the production recommendation set.
+  action_fields:
+    - "testing"
+    - "initial_evaluations"
+
+  # Exact lexical normalization runs first. BioLORD then merges semantically
+  # equivalent action labels at or above this cosine-similarity threshold.
+  cluster_similarity_threshold: 0.90

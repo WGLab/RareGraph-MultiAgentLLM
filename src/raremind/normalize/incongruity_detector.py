@@ -6,7 +6,7 @@ For each patient, compute:
   3. Outlier phenotypes (those outside the dominant branch)
   4. Overall incongruity strength: strong | moderate | weak | none
 
-This is a RareGraph-specific signal used as:
+This is a RareMind-specific signal used as:
   - A retrieval/scoring component (incongruity_match_score)
   - A trigger condition for the frontier consultation call
 """

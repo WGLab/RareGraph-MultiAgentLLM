@@ -1,360 +1,283 @@
-<div align="center">
+# 🧬 RareMind
 
-# 🧬 RareDisGraph-MultiAgentLLM
+### From multimodal patient evidence to ranked rare-disease hypotheses—and clinically actionable next steps
 
-### A Locally Deployable Multi-Agent System for Rare Disease Prioritization
+RareMind is a locally deployable, multi-agent rare-disease reasoning pipeline grounded in **RareGraph**, the structured knowledge graph developed for this project. It integrates clinical notes, phenotype terms, images, and genomic evidence; retrieves and adjudicates disease candidates; produces an auditable final ranking; and now converts its leading diagnostic hypotheses into normalized **next-test and next-step recommendations**.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-blue.svg)](https://www.python.org/)
-[![vLLM](https://img.shields.io/badge/Inference-vLLM-green.svg)](https://github.com/vllm-project/vllm)
-[![PHI Safe](https://img.shields.io/badge/PHI-Local%20Only-red.svg)](#-privacy--phi-compliance)
+**RareMind turns multimodal clinical evidence into an auditable rare-disease differential—and turns that differential into a normalized, traceable plan for what clinicians might evaluate next.**
 
-**RareDisGraph-AgenticAI** pairs a curated rare disease knowledge graph with a single open-weight language model to prioritize diagnoses from clinical cases — all on your own hardware, no patient data ever leaves the machine.
-
-![Pipeline Overview](./figures/Fig1.png)
-
-*Fig. 1 — Full pipeline: multimodal evidence extraction → KG-grounded scoring → LLM reranking → ranked diagnostic output.*
+> **Pipeline name:** RareMind  
+> **Knowledge graph:** RareGraph  
+> **Default final output:** ranked diagnoses **plus** ten normalized clinical actions
 
 ---
 
-[📄 Paper](#-citation) · [🗄️ RareDisGraph KG](https://github.com/WGLab/RareDisGraph-Extraction) · [🐛 Issues](https://github.com/WGLab/RareDisGraph-MultiAgentLLM/issues) · [✉️ Contact](#-contact)
+## ✨ What RareMind does
 
-</div>
+- 📝 Extracts phenotypes, demographics, family history, prior testing, and gene mentions from clinical notes
+- 🖼️ Incorporates phenotype evidence from medical images when available
+- 🧬 Accepts structured HPO terms and external genomic-ranking results
+- 🔗 Grounds retrieval and reasoning in RareGraph, HPO, MONDO, OMIM, Orphanet, and GeneReviews-derived knowledge
+- 🤖 Uses complementary agents for evidence auditing, pairwise adjudication, and group/subtype reconciliation
+- 📊 Preserves every major rank transition in an auditable trajectory
+- 🩺 Converts the final Top-10 disease groups into normalized next tests, referrals, and initial evaluations
 
----
+RareMind is designed to move beyond a single Top-K accuracy number. The accompanying clinical-impact analyses evaluate:
 
-## 📋 Table of Contents
-
-- [Overview](#-overview)
-- [Key Features](#-key-features)
-- [System Requirements](#-system-requirements)
-- [Installation](#-installation)
-- [Download Required Files](#-download-required-files)
-- [Configuration](#-configuration)
-- [Running the Pipeline](#-running-the-pipeline)
-- [Input Formats](#-input-formats)
-- [Output Format](#-output-format)
-- [Evaluation](#-evaluation)
-- [Privacy & PHI Compliance](#-privacy--phi-compliance)
-- [Citation](#-citation)
-- [Contact](#-contact)
+1. ⏱️ **Diagnostic lead time and healthcare utilization**
+2. 🤝 **Alignment with clinician differential diagnoses**
+3. 🛟 **Recovery when the clinician differential misses the eventual diagnosis**
+4. 🚫 **Deprioritization of diagnoses explicitly ruled out in the evaluated note**
+5. 🧪 **Concordance between recommended and subsequently documented tests**
 
 ---
 
-## 🔭 Overview
+## 🧭 The 10-stage pipeline
 
-Matching a patient to one of more than 7,000 rare diseases requires weighing phenotype specificity, inheritance patterns, hallmark features, differential-diagnosis rules and family history — all at once. Most software handles only one of these.
+| Stage | Purpose | Principal output |
+|---:|---|---|
+| 1 | Multimodal clinical extraction | Phenotypes, demographics, family history, testing, genes, and image evidence |
+| 2 | Ontology normalization and post-processing | Normalized HPO evidence, temporal context, inheritance, incongruity |
+| 3 | Candidate retrieval and composite scoring | Broad RareGraph-grounded disease ranking |
+| 4 | Conditional frontier consultation | Targeted review of ambiguous, incongruous, or under-supported cases |
+| 5 | Evidence audit | Supporting, contradicting, and missing expected evidence |
+| 6 | Pairwise adjudication | Subtype- and group-level candidate comparisons |
+| 7 | Rank aggregation | Aggregated subtype and disease-group rankings |
+| 8 | Group/subtype reconciliation and final fusion | Calibrated global `final_rank` |
+| 9 | Clinical scorecard | Human-readable evidence cards for the leading diagnoses |
+| 10 | Next-test and next-step synthesis | Ten normalized, cross-diagnosis clinical actions with provenance |
 
-**RareDisGraph-AgenticAI** integrates all of them in a single local pipeline:
-
-1. **Extract** — A set of agents powered by a single open-weight LLM reads the clinical case and extracts HPO terms, family history, demographics and genetic evidence directly from free text. No pre-curated HPO terms required.
-2. **Score** — Candidates are scored against **RareDisGraph**, a MONDO-anchored knowledge graph built from GeneReviews, OMIM and Orphanet (15,817 diseases · 387,060 HPO-linked phenotype assertions · 67,234 differential-diagnosis edges) using an information-content-weighted composite score that mirrors how a geneticist thinks.
-3. **Rerank** — The same LLM audits the top 30 candidates against their RareDisGraph entries, runs pairwise comparisons using the graph's differential-diagnosis edges, and produces a PageRank-aggregated reranked list.
-4. **Output** — A ranked top-10 list with a traceable evidence scorecard for each candidate.
----
-
-## ✨ Key Features
-
-| Feature | Description |
-|---|---|
-| 🏠 **Fully local** | All inference runs on your own GPU — no API calls, no data transmission |
-| 🔒 **PHI-safe** | Patient data never leaves your machine |
-| 📝 **Free-text input** | Accepts raw clinical notes directly — no pre-curated HPO terms needed |
-| 🧬 **Knowledge-graph grounded** | Scoring and reranking use RareDisGraph, not unconstrained model knowledge |
-| 👨‍👩‍👧 **Family history & demographics** | Parses pedigree patterns and infers inheritance priors automatically |
-| 🖼️ **Multimodal** | Optional facial photograph → HPO terms via vision-language model |
-| 🧪 **VCF support** | Optional genomic variant input adds gene-level evidence |
-| ⚡ **Fast** | ~4–5 min per case on a single A100-40GB with Qwen3-8B |
-| 🔍 **Interpretable** | Every output includes the graph features and audit notes that drove each rank |
+Submitting a patient through `scripts/run_pipeline.py` runs the complete sequence from Stage 1 through Stage 10. Stage 10 is enabled by default.
 
 ---
 
-## 💻 System Requirements
+## 🩺 Stage 10: from diagnosis to action
 
-| Component | Qwen3-8B (default) | MedGemma-27B |
-|---|---|---|
-| GPU | 1× A100 40 GB | 1× H100 80 GB |
-| RAM | 32 GB | 64 GB |
-| Python | 3.9+ | 3.9+ |
-| CUDA | 11.8+ | 12.1+ |
-| OS | Linux (Ubuntu 20.04+) | Linux (Ubuntu 20.04+) |
+Stage 10 applies the same action-normalization strategy used in the retrospective next-test concordance analysis:
 
-> **No quantization is used.** Both backbones run at full precision on the stated hardware.
-
----
-
-## 🛠️ Installation
-
-### 1. Clone the repository (the name of the pipeline is subject to change)
-
-```bash
-git clone https://github.com/WGLab/RareDisGraph-MultiAgentLLM.git
-cd RareDisGraph-MultiAgentLLM
+```text
+Global final ranking
+        ↓
+Disease groups represented within final ranks 1–10
+        ↓
+RareGraph: testing + initial_evaluations
+        ↓
+Lexical canonicalization
+        ↓
+BioLORD semantic clustering (cosine similarity ≥ 0.90)
+        ↓
+Rank by number of supporting disease groups
+        ↓
+Top 10 next tests / evaluations / referrals
 ```
 
-### 2. Create and activate a virtual environment
+Examples of deterministic normalization include:
 
-```bash
-python -m venv venv
-source venv/bin/activate
-```
+- `echo` / `echocardiography` → `echocardiogram`
+- `6MWT` → `six minute walk test`
+- `whole-exome sequencing` → `exome sequencing`
+- `brain natriuretic peptide` → `BNP`
 
-### 3. Install dependencies
+Semantically similar actions that remain lexically different are clustered with the already loaded BioLORD model. Each recommendation retains:
 
-```bash
-pip install -r requirements.txt
-pip install -e .
-```
+- its normalized label and observed aliases;
+- the number of distinct disease groups supporting it;
+- the best final rank among its supporting groups;
+- the RareGraph field(s) that supplied it;
+- the supporting group and representative disease IDs and names.
 
-> If you encounter CUDA version conflicts with vLLM, follow the [vLLM installation guide](https://docs.vllm.ai/en/latest/getting_started/installation.html) for your specific CUDA version.
+This stage generates recommendations from the model output alone. Reference future tests are used only for retrospective evaluation—not during patient inference.
 
----
-
-## 📥 Download Required Files
-
-### RareDisGraph Knowledge Graph
-
-```bash
-# Download the RareDisGraph KG (~2 GB)
-wget -O data/RareDisGraph.pkl \
-  https://github.com/WGLab/RareDisGraph-Extraction/releases/download/v1.0/RareDisGraph.pkl
-```
-
-> The download link will be live upon publication. Contact us to request early access.
-
-### HPO and MONDO Ontologies
-
-```bash
-# Human Phenotype Ontology
-wget -O data/hp.obo \
-  https://github.com/obophenotype/human-phenotype-ontology/releases/latest/download/hp.obo
-
-# MONDO disease ontology
-wget -O data/mondo.obo \
-  https://github.com/monarch-initiative/mondo/releases/latest/download/mondo.obo
-```
-
-### Verify your setup
-
-```bash
-ls -lh data/
-# RareDisGraph.pkl   ~2.0 GB
-# hp.obo          ~200 MB
-# mondo.obo       ~150 MB
-```
-
----
-
-## ⚙️ Configuration
-
-Copy the default config and edit as needed:
-
-```bash
-cp configs/default_config.yaml configs/my_config.yaml
-```
-
-Key fields:
+### Stage 10 configuration
 
 ```yaml
-model:
-  backbone: "Qwen/Qwen3-8B"          # or "google/medgemma-27b-it"
-  gpu_memory_utilization: 0.90
-  max_model_len: 16384
-
-paths:
-  RareDisGraph_path: "data/RareDisGraph.pkl"
-  hpo_obo_path:   "data/hp.obo"
-  mondo_obo_path: "data/mondo.obo"
-
-scoring:
-  graph_blend_weight: 0.65            # 65% KG score + 35% reranked score
-  top_k_candidates: 100
-  top_k_rerank: 30
-
-pipeline:
-  use_family_history: true
-  use_demographics:   true
-  use_vision:         false           # set true if facial photos provided
-  use_vcf:            false           # set true if VCF provided
+next_steps:
+  enabled: true
+  disease_top_k: 10
+  action_top_k: 10
+  action_fields:
+    - testing
+    - initial_evaluations
+  cluster_similarity_threshold: 0.90
 ```
 
 ---
 
-## 🚀 Running the Pipeline
+## 🚀 Running RareMind
 
-### Single case
+### 1. Prepare a dataset folder
+
+At least one supported modality must be present. Clinical text is the usual starting point.
+
+```text
+inputs/
+└── demo/
+    ├── text/
+    │   └── PATIENT_001.txt
+    ├── free_hpo/
+    │   └── PATIENT_001.txt          # optional
+    ├── image/
+    │   └── PATIENT_001.png          # optional
+    └── vcf/
+        └── PATIENT_001.vcf          # optional
+```
+
+The filename stem is the case identifier shared across modalities.
+
+### 2. Configure local resources
+
+Edit [`configs/default.yaml`](configs/default.yaml) to point to:
+
+- the RareGraph JSON;
+- the MONDO hierarchy and cross-mappings;
+- the HPO ontology;
+- local text and vision models;
+- cache and output locations.
+
+The default BioLORD model is `FremyCompany/BioLORD-2023`.
+
+### 3. Run one patient
 
 ```bash
 python scripts/run_pipeline.py \
-  --input  data/examples/case.txt \
-  --config configs/my_config.yaml \
-  --output results/output.json
+  --config configs/default.yaml \
+  --dataset demo \
+  --case_id PATIENT_001
 ```
 
-### With facial photograph and/or VCF
+### 4. Run every discovered patient
 
 ```bash
 python scripts/run_pipeline.py \
-  --input  data/examples/case.txt \
-  --image  data/examples/face.jpg \
-  --vcf    data/examples/variants.vcf \
-  --config configs/my_config.yaml \
-  --output results/output.json
+  --config configs/default.yaml \
+  --dataset demo
 ```
 
-### Batch evaluation on a cohort
+On a SLURM cluster, the supplied wrapper submits the same complete Stage 1–10
+workflow; no separate next-step command is required:
 
 ```bash
-python scripts/run_batch.py \
-  --input_dir  data/cohorts/HMS/ \
-  --config     configs/my_config.yaml \
-  --output_dir results/HMS/ \
-  --n_workers  4
+sbatch -p gpuq --gres=gpu:a100:1 \
+  --wrap="bash scripts/run_agents.sh --dataset demo --input_dir inputs --output_dir outputs"
 ```
 
----
-
-## 📂 Input Formats
-
-The pipeline accepts several input types. See data/examples/{modality} for templates.
-
-###### Modality (name of the input folder): text | free_hpo | image | vcf
-
-#### 📝 Text — free-text clinical note (.txt)
-Patient is a 6-year-old male referred for evaluation of global developmental delay,
-autistic features and seizures. Born to non-consanguineous parents. He sat independently
-at 12 months and walked at 28 months. No speech. Exam shows microcephaly (HC -2.8 SD),
-hypotonia and bilateral simian creases.
-Family history: a maternal cousin has a similar presentation.
-
-#### 🧬 Free HPO terms — semicolon-separated (.txt)
-HP:0001249; HP:0000729; HP:0001250; HP:0000252; HP:0001290; HP:0000316
-
-#### 🖼️ Facial photograph — vision pathway (.png, .jpg, .jpeg)
-
-Provide a frontal facial photograph. The vision agent converts it into HPO terms automatically and merges them with any text-derived phenotypes before scoring.
+Useful overrides:
 
 ```bash
-  python scripts/run_pipeline.py \
-    --input data/examples/case.txt \
-    --image data/examples/face.png \
-    --config configs/my_config.yaml \
-    --output results/output.json
+# Test a different local text model
+python scripts/run_pipeline.py --dataset demo --text_model Qwen/Qwen3-8B
+
+# Process only the first ten discovered cases
+python scripts/run_pipeline.py --dataset demo --limit 10
+
+# Recompute Stage 1 caches
+python scripts/run_pipeline.py --dataset demo --overwrite_stage1_cache
 ```
 
-#### 🧪 Genomic variants — VCF file (.vcf)
-
-A VCF file adds gene-level evidence. The pipeline extracts candidate genes from the variant calls and adds a gene-evidence bonus to candidates whose causal genes overlap.
-
-```bash
-python scripts/run_pipeline.py \
-  --input data/examples/case.txt \
-  --vcf   data/examples/variants.vcf \
-  --config configs/my_config.yaml \
-  --output results/output.json
-```
-
-All input types can be combined. For example, a text note + HPO terms + facial photo + VCF can all be passed together and the pipeline will merge the evidence from each source before scoring.
----
-
-## 📊 Output Format
-
-Each run produces a JSON file with the top-10 ranked diagnoses and a full evidence scorecard per candidate:
-
-```json
-{
-  "patient_id": "CASE_001",
-  "top_diagnoses": [
-    {
-      "rank": 1,
-      "mondo_id": "MONDO:0010726",
-      "disease_name": "Angelman syndrome",
-      "gene": "UBE3A",
-      "kg_score": 0.847,
-      "final_score": 0.891,
-      "scorecard": {
-        "matching_phenotypes": ["HP:0001249", "HP:0000729", "HP:0001250"],
-        "hallmark_match": "HP:0000729 (autistic features) — HIGH SPECIFICITY",
-        "missing_hallmarks": [],
-        "contradictions": [],
-        "audit_note": "Strong match on autistic features and seizures. No contradictions.",
-        "pairwise_wins": 8,
-        "pairwise_losses": 1
-      }
-    }
-  ],
-  "pipeline_metadata": {
-    "backbone": "Qwen/Qwen3-8B",
-    "kg_version": "v1.0",
-    "runtime_seconds": 287,
-    "not_found": false
-  }
-}
-```
+> A Linux environment with an NVIDIA GPU is recommended for the local vLLM stages. BioLORD action normalization uses `sentence-transformers` and reuses the embedder already loaded for ontology normalization.
 
 ---
 
-## 🔒 Privacy & PHI Compliance
+## 📦 Per-patient outputs
 
-This system was designed for use with real patient data in clinical environments:
+```text
+outputs/<dataset>/<case_id>/
+├── stage1_extraction.json
+├── stage2_patient_evidence.json
+├── stage3_composite_ranking.tsv
+├── stage5_audit_results.json
+├── stage5_ranking_after_audit.tsv
+├── stage6_pairwise_results_subtype.json
+├── stage6_pairwise_results_group.json
+├── stage7_reranked_subtype.tsv
+├── stage7_reranked_group.tsv
+├── stage8_reconciled_ranking.tsv
+├── stage8_final_fusion.tsv
+├── stage8_reconciled.json
+├── stage9_scorecard.json
+├── stage9_scorecard.txt
+├── stage10_next_steps.tsv
+└── rank_trajectory.tsv
+```
 
-- ✅ **No API calls** — every LLM step runs on your local GPU
-- ✅ **No telemetry** — no usage data is collected or transmitted
-- ✅ **No cloud storage** — all inputs and outputs stay on your machine
-- ✅ **Suitable for PHI** — compatible with HIPAA-conscious deployment on institutional hardware
+The dataset-level `summary.tsv` includes the leading diagnosis, its final rank, the highest-ranked next step, and the complete Top-10 action list.
 
-> You are responsible for ensuring your computational environment meets your institution's data-governance requirements before processing real patient data.
+### Stage 10 output
+
+**`stage10_next_steps.tsv`** is the single canonical Stage 10 artifact. It
+contains the normalized Top-10 actions, aliases, supporting disease groups and
+diseases, source RareGraph fields, ranking support, normalization metadata, and
+the selected source disease groups.
 
 ---
 
-## 📄 Citation
+## 🔬 Clinical-impact analyses
 
-If you use RareDisGraph-MultiAgentLLM in your research, please cite:
+The [`clinical_impact_analyses`](clinical_impact_analyses) workspace contains the retrospective evaluation notebooks and reusable functions for:
+
+- earliest computationally recoverable diagnostic signal;
+- utilization accumulated before formal genetic-testing recommendation;
+- clinician-differential alignment and missed-diagnosis recovery;
+- note-aligned ruled-out negative controls;
+- next-test lexical and BioLORD semantic concordance;
+- publication-ready figures and review tables.
+
+These analyses are intentionally separated from patient inference. Cohort labels and future documented tests never enter the RareMind ranking or Stage 10 recommendation process.
+
+---
+
+## 🧱 Repository map
+
+```text
+src/raremind/                  Canonical RareMind implementation
+├── agents/                    Extraction agents
+├── normalize/                 HPO, MONDO, temporal, and BioLORD normalization
+├── kg/                        RareGraph loading and indexing
+├── retrieval/                 Candidate-generation channels
+├── scoring/                   Deterministic composite scoring
+├── reasoning/                 Audit, adjudication, fusion, scorecard, Stage 10
+└── orchestration/             End-to-end patient runner
+
+scripts/run_pipeline.py        Main 10-stage command-line entry point
+configs/default.yaml           Runtime and Stage 10 configuration
+clinical_impact_analyses/      Retrospective clinical-impact evaluations
+```
+
+New code should import the pipeline from `raremind`. A minimal historical
+`raregraph` compatibility namespace is retained to avoid abruptly breaking
+existing environments; **RareGraph** otherwise refers only to the knowledge
+graph.
+
+---
+
+## 🛡️ Intended use
+
+RareMind is a research decision-support system. Its rankings and suggested actions are not medical advice, are not a substitute for clinical judgment, and require review in the context of the complete patient record, prior testing, local practice, and test availability.
+
+For protected health information, use only approved infrastructure and follow institutional privacy, security, and data-governance requirements.
+
+---
+
+## 🌟 Citation 📜
+
+The full RareMind manuscript is currently in preparation. Until it becomes
+available, if you use or reference RareMind, RareGraph, or this repository,
+please cite our published work:
+
+**Nguyen QM, Wang K.**  
+RareGraph-AgenticAI: A Multimodal Knowledge Graph and Multi-agent LLM Framework for Rare Disease Evaluation and Gene Prioritization.  
+In: *Artificial Intelligence in Medicine*. Springer Nature Switzerland; 2026:445–450.  
+https://doi.org/10.1007/978-3-032-30813-9_82
+
+### BibTeX
 
 ```bibtex
-@article{nguyen2025RareDisGraph,
-  title   = {A locally deployable multi-agent system for rare disease
-             prioritization using a curated knowledge graph and
-             open-weight language models},
-  author  = {Nguyen, Quan M. and Wang, Kai},
-  journal = {Under review},
-  year    = {2026},
-  note    = {Under review},
-  url     = {https://github.com/WGLab/RareDisGraph-MultiAgentLLM}
+@inproceedings{nguyen2026raregraph,
+  author    = {Nguyen, Quan M. and Wang, Kai},
+  title     = {RareGraph-AgenticAI: A Multimodal Knowledge Graph and Multi-agent LLM Framework for Rare Disease Evaluation and Gene Prioritization},
+  booktitle = {Artificial Intelligence in Medicine},
+  year      = {2026},
+  pages     = {445--450},
+  publisher = {Springer Nature Switzerland},
+  doi       = {10.1007/978-3-032-30813-9_82}
 }
-```
-
-Also cite the RareDisGraph knowledge graph:
-
-```bibtex
-@software{RareDisGraph2025,
-  author = {Nguyen, Quan Minh and Wang, Kai},
-  title  = {RareDisGraph: A MONDO-anchored rare disease knowledge graph
-            integrating GeneReviews, OMIM and Orphanet},
-  year   = {2025},
-  url    = {https://github.com/WGLab/RareDisGraph-Extraction}
-}
-```
-
----
-
-## 📬 Contact
-
-For questions, bug reports or collaboration inquiries:
-
-| Name | Role | Email |
-|---|---|---|
-| **Quan Minh Nguyen** | Lead developer · PhD Student, University of Pennsylvania | [nguyenqm@chop.edu](mailto:nguyenqm@chop.edu) |
-| **Kai Wang** | Principal Investigator · Children's Hospital of Philadelphia | [wangk@chop.edu](mailto:wangk@chop.edu) |
-
-For bugs and feature requests please open a [GitHub Issue](https://github.com/WGLab/RareDisGraph-MultiAgentLLM/issues).
-
----
-
-<div align="center">
-
-**Wang Genomics Lab** · Children's Hospital of Philadelphia · University of Pennsylvania
-
-[![WGLab](https://img.shields.io/badge/Lab-Wang%20Genomics%20Lab-blue)](https://github.com/WGLab)
-
-</div>

@@ -5,7 +5,7 @@ import logging
 import sys
 
 
-def setup_logger(name: str = "raregraph", level: int = logging.INFO) -> logging.Logger:
+def setup_logger(name: str = "raremind", level: int = logging.INFO) -> logging.Logger:
     logger = logging.getLogger(name)
     if logger.handlers:
         return logger

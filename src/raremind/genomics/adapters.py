@@ -1,4 +1,4 @@
-"""Adapters from external genomics rankers into RareGraph vcf_summary rows."""
+"""Adapters from external genomics rankers into RareMind vcf_summary rows."""
 from __future__ import annotations
 
 import csv

@@ -4,7 +4,7 @@ For each pair of patient phenotypes (ancestor-expanded), look up in the
 precomputed pair_to_diseases table. Rare pairs (few diseases) contribute
 strongly; common pairs contribute weakly.
 
-This is a RareGraph-specific retrieval channel that captures combination-level
+This is a RareMind-specific retrieval channel that captures combination-level
 signals beyond individual-phenotype matching.
 """
 from __future__ import annotations
@@ -12,8 +12,8 @@ from __future__ import annotations
 from itertools import combinations
 from typing import Any, Dict, List, Set
 
-from raregraph.kg.kg_precompute import KGIndex
-from raregraph.normalize.hpo_ontology import HpoOntology
+from raremind.kg.kg_precompute import KGIndex
+from raremind.normalize.hpo_ontology import HpoOntology
 
 
 def retrieve_by_cooccurrence(

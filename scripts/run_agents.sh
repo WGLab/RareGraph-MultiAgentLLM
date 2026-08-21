@@ -46,12 +46,6 @@ OVERWRITE_VISION_CACHE=""
 NO_STAGE1_PREFETCH=""
 OVERWRITE_STAGE1_CACHE=""
 
-# Continuing
-SKIP_COMPLETED=""
-COMPLETION_FILE=""
-ARRAY_INDEX=""
-ARRAY_COUNT=""
-
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
@@ -98,10 +92,6 @@ while [[ $# -gt 0 ]]; do
         --no_stage1_prefetch)     NO_STAGE1_PREFETCH="1";     shift   ;;
         --overwrite_stage1_cache) OVERWRITE_STAGE1_CACHE="1"; shift   ;;
         --verbose)                VERBOSE="1";                shift   ;;
-        --skip_completed) SKIP_COMPLETED="1"; shift ;;
-        --completion_file) COMPLETION_FILE="$2"; shift 2 ;;
-        --array_index) ARRAY_INDEX="$2"; shift 2 ;;
-        --array_count) ARRAY_COUNT="$2"; shift 2 ;;
         -h|--help)                usage; exit 0               ;;
         *) echo "[ERROR] Unknown argument: $1"; usage; exit 1 ;;
     esac
@@ -124,7 +114,7 @@ cd "$REPO_ROOT"
 # Environment setup
 # ---------------------------------------------------------------------------
 echo "======================================================="
-echo " RareGraph Pipeline"
+echo " RareMind 10-Stage Pipeline"
 echo " Dataset : $DATASET"
 echo " Input   : $INPUT_DIR/$DATASET"
 echo " Output  : $OUTPUT_DIR/$DATASET"
@@ -161,10 +151,6 @@ PYTHON_ARGS=(
 [[ -n "$NO_STAGE1_PREFETCH"     ]] && PYTHON_ARGS+=(--no_stage1_prefetch)
 [[ -n "$OVERWRITE_STAGE1_CACHE" ]] && PYTHON_ARGS+=(--overwrite_stage1_cache)
 [[ -n "$VERBOSE"                ]] && PYTHON_ARGS+=(--verbose)
-[[ -n "$SKIP_COMPLETED" ]] && PYTHON_ARGS+=(--skip_completed)
-[[ -n "$COMPLETION_FILE" ]] && PYTHON_ARGS+=(--completion_file "$COMPLETION_FILE")
-[[ -n "$ARRAY_INDEX" ]] && PYTHON_ARGS+=(--array_index "$ARRAY_INDEX")
-[[ -n "$ARRAY_COUNT" ]] && PYTHON_ARGS+=(--array_count "$ARRAY_COUNT")
 
 echo ""
 echo "Command: python scripts/run_pipeline.py ${PYTHON_ARGS[*]}"
@@ -182,126 +168,3 @@ echo " Finished : $(date)"
 echo " Exit code: $EXIT_CODE"
 echo "======================================================="
 exit $EXIT_CODE
-
-
-# sbatch -p gpu-xe9680q \
-#         --gres=gpu:h100:1 \
-#         --cpus-per-gpu=1 \
-#         --mem-per-cpu=20G \
-#         --time=5-00:00:00 \
-#         --wrap="bash /home/nguyenqm/projects/MultiAgentLLM/scripts/run_agents.sh \
-#                 --input_dir /home/nguyenqm/projects/rare_dx_mcp/inputs \
-#                 --dataset HMS \
-#                 --output_dir /home/nguyenqm/projects/MultiAgentLLM/outputs_medgemma27b \
-#                 --config /home/nguyenqm/projects/MultiAgentLLM/configs/default.yaml \
-#                 --text_model google/medgemma-27b-it"
-
-# sbatch -p gpu-xe9680q \
-#         --gres=gpu:h100:1 \
-#         --cpus-per-gpu=1 \
-#         --mem-per-cpu=20G \
-#         --time=5-00:00:00 \
-#         --wrap="bash /home/nguyenqm/projects/MultiAgentLLM/scripts/run_agents.sh \
-#                 --input_dir /home/nguyenqm/projects/rare_dx_mcp/inputs \
-#                 --dataset MME \
-#                 --output_dir /home/nguyenqm/projects/MultiAgentLLM/outputs_medgemma27b \
-#                 --config /home/nguyenqm/projects/MultiAgentLLM/configs/default.yaml \
-#                 --text_model google/medgemma-27b-it"
-
-# sbatch -p gpu-xe9680q \
-#         --gres=gpu:h100:1 \
-#         --cpus-per-gpu=1 \
-#         --mem-per-cpu=20G \
-#         --time=5-00:00:00 \
-#        --array=1-2 \
-#         --wrap="bash /home/nguyenqm/projects/MultiAgentLLM/scripts/run_agents.sh \
-#                 --input_dir /home/nguyenqm/projects/rare_dx_mcp/inputs \
-#                 --dataset LIRICAL \
-#                 --output_dir /home/nguyenqm/projects/MultiAgentLLM/outputs_medgemma27b \
-#                 --config /home/nguyenqm/projects/MultiAgentLLM/configs/default.yaml \
-#                 --text_model google/medgemma-27b-it --skip_completed"
-
-# sbatch -p gpu-xe9680q \
-#         --gres=gpu:h100:1 \
-#         --cpus-per-gpu=1 \
-#         --mem-per-cpu=20G \
-#         --time=9-00:00:00 \
-#         --array=1-2 \
-#         --wrap="bash /home/nguyenqm/projects/MultiAgentLLM/scripts/run_agents.sh \
-#                 --input_dir /home/nguyenqm/projects/rare_dx_mcp/inputs \
-#                 --dataset RAMEDIS \
-#                 --output_dir /home/nguyenqm/projects/MultiAgentLLM/outputs_medgemma27b \
-#                 --config /home/nguyenqm/projects/MultiAgentLLM/configs/default.yaml \
-#                 --text_model google/medgemma-27b-it --skip_completed"
-
-# sbatch -p gpu-xe9680q \
-#         --gres=gpu:h100:1 \
-#         --cpus-per-gpu=1 \
-#         --mem-per-cpu=20G \
-#         --time=5-00:00:00 \
-#         --wrap="bash /home/nguyenqm/projects/MultiAgentLLM/scripts/run_agents.sh \
-#                 --input_dir /home/nguyenqm/projects/rare_dx_mcp/inputs \
-#                 --dataset HMS \
-#                 --output_dir /home/nguyenqm/projects/MultiAgentLLM/outputs_medgemma4b \
-#                 --config /home/nguyenqm/projects/MultiAgentLLM/configs/default.yaml \
-#                 --text_model google/medgemma-4b-it"
-
-# sbatch -p gpu-xe9680q \
-#         --gres=gpu:h100:1 \
-#         --cpus-per-gpu=1 \
-#         --mem-per-cpu=20G \
-#         --time=5-00:00:00 \
-#         --wrap="bash /home/nguyenqm/projects/MultiAgentLLM/scripts/run_agents.sh \
-#                 --input_dir /home/nguyenqm/projects/rare_dx_mcp/inputs \
-#                 --dataset MME \
-#                 --output_dir /home/nguyenqm/projects/MultiAgentLLM/outputs_medgemma4b \
-#                 --config /home/nguyenqm/projects/MultiAgentLLM/configs/default.yaml \
-#                 --text_model google/medgemma-4b-it"
-
-# sbatch -p gpu-xe9680q \
-#         --gres=gpu:h100:1 \
-#         --cpus-per-gpu=1 \
-#         --mem-per-cpu=20G \
-#         --time=5-00:00:00 \
-#         --wrap="bash /home/nguyenqm/projects/MultiAgentLLM/scripts/run_agents.sh \
-#                 --input_dir /home/nguyenqm/projects/rare_dx_mcp/inputs \
-#                 --dataset LIRICAL \
-#                 --output_dir /home/nguyenqm/projects/MultiAgentLLM/outputs_medgemma4b \
-#                 --config /home/nguyenqm/projects/MultiAgentLLM/configs/default.yaml \
-#                 --text_model google/medgemma-4b-it"
-
-# sbatch -p gpu-xe9680q \
-#         --gres=gpu:h100:1 \
-#         --cpus-per-gpu=1 \
-#         --mem-per-cpu=20G \
-#         --time=5-00:00:00 \
-#         --wrap="bash /home/nguyenqm/projects/MultiAgentLLM/scripts/run_agents.sh \
-#                 --input_dir /home/nguyenqm/projects/rare_dx_mcp/inputs \
-#                 --dataset RAMEDIS \
-#                 --output_dir /home/nguyenqm/projects/MultiAgentLLM/outputs_medgemma4b \
-#                 --config /home/nguyenqm/projects/MultiAgentLLM/configs/default.yaml \
-#                 --text_model google/medgemma-4b-it"
-
-# sbatch -p gpu-xe9680q \
-#         --gres=gpu:h100:1 \
-#         --cpus-per-gpu=1 \
-#         --mem-per-cpu=20G \
-#         --time=5-00:00:00 \
-#         --wrap="bash /home/nguyenqm/projects/MultiAgentLLM/scripts/run_agents.sh \
-#                 --input_dir /home/nguyenqm/projects/rare_dx_mcp/inputs \
-#                 --dataset GMDB_text_part1 \
-#                 --output_dir /home/nguyenqm/projects/MultiAgentLLM/outputs \
-#                 --config /home/nguyenqm/projects/MultiAgentLLM/configs/default.yaml \
-#                 --text_model google/medgemma-27b-it"
-
-# sbatch -p gpu-xe9680q \
-#         --gres=gpu:h100:1 \
-#         --cpus-per-gpu=1 \
-#         --mem-per-cpu=20G \
-#         --time=5-00:00:00 \
-#         --wrap="bash /home/nguyenqm/projects/MultiAgentLLM/scripts/run_agents.sh \
-#                 --input_dir /home/nguyenqm/projects/rare_dx_mcp/inputs \
-#                 --dataset GMDB_text_part2 \
-#                 --output_dir /home/nguyenqm/projects/MultiAgentLLM/outputs \
-#                 --config /home/nguyenqm/projects/MultiAgentLLM/configs/default.yaml \
-#                 --text_model Qwen/Qwen3-8B"

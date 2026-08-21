@@ -1,4 +1,4 @@
-"""Composite ranker: Stage 3 of RareGraph.
+"""Composite ranker: Stage 3 of RareMind.
 
 Combines the production phenotype/KG scoring components:
   1. Phenotype (IC-weighted + freq-aware negation + competitive IC)
@@ -27,10 +27,10 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from raregraph.core.compat import to_dict
-from raregraph.core.config import cfg_get, retrieval_retain_top_k
-from raregraph.kg.kg_precompute import KGIndex
-from raregraph.normalize.hpo_ontology import HpoOntology
+from raremind.core.compat import to_dict
+from raremind.core.config import cfg_get, retrieval_retain_top_k
+from raremind.kg.kg_precompute import KGIndex
+from raremind.normalize.hpo_ontology import HpoOntology
 
 from .phenotype_score import phenotype_score, PhenotypeScoreConfig
 from .phenotype_profile_score import phenotype_profile_score

@@ -79,7 +79,7 @@ class RankedDisease(BaseModel):
 
 
 # ---------------------------------------------------------------
-# Temporal / incongruity (NEW in RareGraph)
+# Temporal / incongruity (NEW in RareMind)
 # ---------------------------------------------------------------
 class TemporalView(BaseModel):
     earliest_features: List[str] = Field(default_factory=list)
